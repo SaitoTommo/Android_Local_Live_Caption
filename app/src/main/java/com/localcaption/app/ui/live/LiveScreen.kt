@@ -496,54 +496,51 @@ private fun StatusBanner(
                 AudioWaveformMeter(level = audioLevel)
             }
 
-            if (isActive && !isInitializing) {
-                val providerLabel = when {
-                    telemetry.activeProvider == AppSettings.PROVIDER_NNAPI -> "推理后端: NNAPI (已启用)"
-                    telemetry.fellBackFromNnapi -> "推理后端: CPU (NNAPI 不支持已回退)"
-                    else -> "推理后端: CPU"
+            val hardwareChipText = when {
+                !nativeAvailable -> "引擎未就绪"
+                isActive && !isInitializing -> when {
+                    telemetry.activeProvider == AppSettings.PROVIDER_NNAPI -> "NPU (NNAPI)"
+                    telemetry.fellBackFromNnapi -> "CPU（NPU不支持已回退）"
+                    else -> "CPU"
                 }
-                val perfSuffix = if (telemetry.lastInferenceMs > 0L) {
-                    val rtfText = if (telemetry.lastRtf > 0f) {
-                        String.format(java.util.Locale.US, " · RTF %.2fx", telemetry.lastRtf)
-                    } else {
-                        ""
-                    }
-                    " · 最近推理 ${telemetry.lastInferenceMs} ms$rtfText"
-                } else {
-                    ""
-                }
-                val isNnapiActive = telemetry.activeProvider == AppSettings.PROVIDER_NNAPI
-                Text(
-                    text = providerLabel + perfSuffix,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = when {
-                        isNnapiActive -> Color(0xFF2FBF8F)
-                        telemetry.fellBackFromNnapi -> MaterialTheme.colorScheme.error
-                        else -> MaterialTheme.colorScheme.onSurfaceVariant
-                    },
-                )
-            } else if (!isActive && requestedProvider == AppSettings.PROVIDER_NNAPI) {
-                Text(
-                    text = "已选推理后端: NNAPI（开始识别后将显示是否成功启用及实时耗时）",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                requestedProvider == AppSettings.PROVIDER_NNAPI -> "NPU (NNAPI)"
+                else -> "CPU"
             }
+            val hardwareIsError = !nativeAvailable || (isActive && !isInitializing && telemetry.fellBackFromNnapi)
+            val hardwareIsNpuActive = isActive && !isInitializing &&
+                telemetry.activeProvider == AppSettings.PROVIDER_NNAPI
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 MetaChip(text = modelName, icon = Icons.Filled.GraphicEq)
                 MetaChip(
-                    text = if (nativeAvailable) "sherpa-onnx 已集成" else "sherpa-onnx 未集成",
-                    icon = if (nativeAvailable) Icons.Filled.GraphicEq else Icons.Filled.WarningAmber,
-                    containerColor = if (nativeAvailable) {
-                        MaterialTheme.colorScheme.secondaryContainer
-                    } else {
-                        MaterialTheme.colorScheme.errorContainer
+                    text = hardwareChipText,
+                    icon = if (hardwareIsError) Icons.Filled.WarningAmber else Icons.Filled.GraphicEq,
+                    containerColor = when {
+                        hardwareIsError -> MaterialTheme.colorScheme.errorContainer
+                        hardwareIsNpuActive -> MaterialTheme.colorScheme.primaryContainer
+                        else -> MaterialTheme.colorScheme.secondaryContainer
                     },
-                    contentColor = if (nativeAvailable) {
-                        MaterialTheme.colorScheme.onSecondaryContainer
+                    contentColor = when {
+                        hardwareIsError -> MaterialTheme.colorScheme.onErrorContainer
+                        hardwareIsNpuActive -> MaterialTheme.colorScheme.onPrimaryContainer
+                        else -> MaterialTheme.colorScheme.onSecondaryContainer
+                    },
+                )
+            }
+
+            if (isActive && !isInitializing && telemetry.lastInferenceMs > 0L) {
+                val rtfText = if (telemetry.lastRtf > 0f) {
+                    String.format(java.util.Locale.US, " · RTF %.2fx", telemetry.lastRtf)
+                } else {
+                    ""
+                }
+                Text(
+                    text = "最近推理耗时：${telemetry.lastInferenceMs} ms$rtfText",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (hardwareIsNpuActive) {
+                        Color(0xFF2FBF8F)
                     } else {
-                        MaterialTheme.colorScheme.onErrorContainer
+                        MaterialTheme.colorScheme.onSurfaceVariant
                     },
                 )
             }

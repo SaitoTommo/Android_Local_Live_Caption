@@ -17,18 +17,26 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.WarningAmber
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -223,6 +231,19 @@ fun SettingsScreen() {
                     preview(current.copy(numThreads = it.roundToInt()))
                 },
                 onValueChangeFinished = { commit() },
+                inputValue = "${current.numThreads}",
+                inputUnit = "线程",
+                inputRangeHint = "范围：${AppSettings.MIN_NUM_THREADS} – ${AppSettings.MAX_NUM_THREADS}",
+                onDirectInput = { typed ->
+                    persist(
+                        current.copy(
+                            numThreads = typed.roundToInt().coerceIn(
+                                AppSettings.MIN_NUM_THREADS,
+                                AppSettings.MAX_NUM_THREADS,
+                            ),
+                        ),
+                    )
+                },
             )
 
             Text(
@@ -269,6 +290,13 @@ fun SettingsScreen() {
                     preview(current.copy(diarizationThreshold = it))
                 },
                 onValueChangeFinished = { commit() },
+                inputValue = String.format(Locale.US, "%.2f", current.diarizationThreshold),
+                inputUnit = "",
+                inputRangeHint = "范围：0.10 – 0.95",
+                isDecimal = true,
+                onDirectInput = { typed ->
+                    persist(current.copy(diarizationThreshold = typed.coerceIn(0.1f, 0.95f)))
+                },
             )
         }
 
@@ -277,12 +305,24 @@ fun SettingsScreen() {
                 title = "静音断句时长",
                 valueText = "${current.vadSilenceMs} ms",
                 value = current.vadSilenceMs.toFloat(),
-                valueRange = AppSettings.MIN_VAD_SILENCE_MS.toFloat()..
-                    AppSettings.MAX_VAD_SILENCE_MS.toFloat(),
+                valueRange = 100f..500f,
                 onValueChange = {
                     preview(current.copy(vadSilenceMs = it.roundToInt()))
                 },
                 onValueChangeFinished = { commit() },
+                inputValue = "${current.vadSilenceMs}",
+                inputUnit = "ms",
+                inputRangeHint = "滑块 100–500 ms，手动输入支持 ${AppSettings.MIN_VAD_SILENCE_MS}–${AppSettings.MAX_VAD_SILENCE_MS} ms",
+                onDirectInput = { typed ->
+                    persist(
+                        current.copy(
+                            vadSilenceMs = typed.roundToInt().coerceIn(
+                                AppSettings.MIN_VAD_SILENCE_MS,
+                                AppSettings.MAX_VAD_SILENCE_MS,
+                            ),
+                        ),
+                    )
+                },
             )
             SliderRow(
                 title = "句首回溯比例（前段空白占比）",
@@ -293,9 +333,19 @@ fun SettingsScreen() {
                     preview(current.copy(preRollSilenceRatio = it))
                 },
                 onValueChangeFinished = { commit() },
+                inputValue = "${(current.preRollSilenceRatio * 100).roundToInt()}",
+                inputUnit = "%",
+                inputRangeHint = "范围：0 – 100 %",
+                onDirectInput = { typed ->
+                    persist(
+                        current.copy(
+                            preRollSilenceRatio = (typed / 100f).coerceIn(0f, 1f),
+                        ),
+                    )
+                },
             )
             Text(
-                text = "按当前句前方空白间隔的比例回溯音频（上限 180 ms）以保留开头清辅音；调为 0% 则完全关闭回溯。",
+                text = "按当前句前方空白间隔的比例回溯音频（上限 180 ms）以保留开头清辅音；调为 0% 则完全关闭回溯。点击任意数值可直接手动输入。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -313,6 +363,17 @@ fun SettingsScreen() {
                     preview(current.copy(maxSegmentDurationMs = it.roundToInt()))
                 },
                 onValueChangeFinished = { commit() },
+                inputValue = String.format(Locale.US, "%.1f", current.maxSegmentDurationMs / 1000f),
+                inputUnit = "s",
+                inputRangeHint = "范围：${AppSettings.MIN_SEGMENT_DURATION_MS / 1000} – ${AppSettings.MAX_SEGMENT_DURATION_MS / 1000} s",
+                isDecimal = true,
+                onDirectInput = { typed ->
+                    val ms = (typed * 1000f).roundToInt().coerceIn(
+                        AppSettings.MIN_SEGMENT_DURATION_MS,
+                        AppSettings.MAX_SEGMENT_DURATION_MS,
+                    )
+                    persist(current.copy(maxSegmentDurationMs = ms))
+                },
             )
         }
 
@@ -324,6 +385,12 @@ fun SettingsScreen() {
                 valueRange = 12f..40f,
                 onValueChange = { preview(current.copy(fontSizeSp = it)) },
                 onValueChangeFinished = { commit() },
+                inputValue = String.format(Locale.US, "%.0f", current.fontSizeSp),
+                inputUnit = "sp",
+                inputRangeHint = "范围：12 – 40 sp",
+                onDirectInput = { typed ->
+                    persist(current.copy(fontSizeSp = typed.coerceIn(12f, 40f)))
+                },
             )
             SliderRow(
                 title = "背景不透明度",
@@ -332,6 +399,19 @@ fun SettingsScreen() {
                 valueRange = AppSettings.MIN_OVERLAY_ALPHA..AppSettings.MAX_OVERLAY_ALPHA,
                 onValueChange = { preview(current.copy(overlayBgAlpha = it)) },
                 onValueChangeFinished = { commit() },
+                inputValue = "${(current.overlayBgAlpha * 100).roundToInt()}",
+                inputUnit = "%",
+                inputRangeHint = "范围：10 – 100 %",
+                onDirectInput = { typed ->
+                    persist(
+                        current.copy(
+                            overlayBgAlpha = (typed / 100f).coerceIn(
+                                AppSettings.MIN_OVERLAY_ALPHA,
+                                AppSettings.MAX_OVERLAY_ALPHA,
+                            ),
+                        ),
+                    )
+                },
             )
             SliderRow(
                 title = "最多显示行数",
@@ -344,6 +424,19 @@ fun SettingsScreen() {
                     preview(current.copy(overlayMaxLines = it.roundToInt()))
                 },
                 onValueChangeFinished = { commit() },
+                inputValue = "${current.overlayMaxLines}",
+                inputUnit = "行",
+                inputRangeHint = "范围：${AppSettings.MIN_OVERLAY_LINES} – ${AppSettings.MAX_OVERLAY_LINES} 行",
+                onDirectInput = { typed ->
+                    persist(
+                        current.copy(
+                            overlayMaxLines = typed.roundToInt().coerceIn(
+                                AppSettings.MIN_OVERLAY_LINES,
+                                AppSettings.MAX_OVERLAY_LINES,
+                            ),
+                        ),
+                    )
+                },
             )
             SwitchRow(
                 title = "显示时间戳",
@@ -529,7 +622,15 @@ private fun SliderRow(
     onValueChangeFinished: () -> Unit,
     steps: Int = 0,
     enabled: Boolean = true,
+    inputValue: String = "",
+    inputUnit: String = "",
+    inputRangeHint: String = "",
+    isDecimal: Boolean = false,
+    onDirectInput: ((Float) -> Unit)? = null,
 ) {
+    var showInputDialog by remember { mutableStateOf(false) }
+    var draftText by remember { mutableStateOf("") }
+
     Column {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
@@ -537,11 +638,40 @@ private fun SliderRow(
                 style = MaterialTheme.typography.bodyLarge,
                 modifier = Modifier.weight(1f),
             )
-            Text(
-                text = valueText,
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.primary,
-            )
+            if (onDirectInput != null) {
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.secondaryContainer,
+                    modifier = Modifier.clickable(enabled = enabled) {
+                        draftText = inputValue
+                        showInputDialog = true
+                    },
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Text(
+                            text = valueText,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                        )
+                        Icon(
+                            imageVector = Icons.Filled.Edit,
+                            contentDescription = "手动输入",
+                            modifier = Modifier.size(13.dp),
+                            tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                        )
+                    }
+                }
+            } else {
+                Text(
+                    text = valueText,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
         }
         Slider(
             value = value.coerceIn(valueRange.start, valueRange.endInclusive),
@@ -550,6 +680,52 @@ private fun SliderRow(
             steps = steps,
             enabled = enabled,
             onValueChangeFinished = onValueChangeFinished,
+        )
+    }
+
+    if (showInputDialog && onDirectInput != null) {
+        AlertDialog(
+            onDismissRequest = { showInputDialog = false },
+            title = { Text("设置$title") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (inputRangeHint.isNotBlank()) {
+                        Text(
+                            text = inputRangeHint,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    OutlinedTextField(
+                        value = draftText,
+                        onValueChange = { draftText = it },
+                        singleLine = true,
+                        label = {
+                            Text(if (inputUnit.isNotBlank()) "数值（$inputUnit）" else "数值")
+                        },
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = if (isDecimal) KeyboardType.Decimal else KeyboardType.Number,
+                        ),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val parsed = draftText.trim().toFloatOrNull()
+                        showInputDialog = false
+                        if (parsed != null) {
+                            onDirectInput(parsed)
+                        }
+                    },
+                ) {
+                    Text("确定")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showInputDialog = false }) { Text("取消") }
+            },
         )
     }
 }
