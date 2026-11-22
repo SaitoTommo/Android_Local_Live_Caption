@@ -376,7 +376,7 @@ class FloatingOverlayManager(
             ResizeCorner.BOTTOM_LEFT -> Gravity.BOTTOM or Gravity.START
             ResizeCorner.BOTTOM_RIGHT -> Gravity.BOTTOM or Gravity.END
         }
-        return CornerGripView(context, corner).apply {
+        return View(context).apply {
             layoutParams = FrameLayout.LayoutParams(handleSize, handleSize, gravity)
             contentDescription = CONTENT_DESC_RESIZE
             attachResizeHandler(this, corner)

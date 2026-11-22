@@ -159,30 +159,6 @@ fun SettingsScreen() {
             onOpenAppDetails = { openAppDetails() },
         )
 
-        SettingsSection("音频来源") {
-            Text(
-                text = "手机内录可以转写其他应用播放的声音；麦克风收音用于面对面对话。",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(
-                    selected = current.audioSource == AudioSourceType.PLAYBACK_CAPTURE,
-                    onClick = {
-                        persist(current.copy(audioSource = AudioSourceType.PLAYBACK_CAPTURE))
-                    },
-                    label = { Text("手机内录") },
-                )
-                FilterChip(
-                    selected = current.audioSource == AudioSourceType.MICROPHONE,
-                    onClick = {
-                        persist(current.copy(audioSource = AudioSourceType.MICROPHONE))
-                    },
-                    label = { Text("麦克风收音") },
-                )
-            }
-        }
-
         SettingsSection("语音识别") {
             Text(
                 text = "识别模型",
