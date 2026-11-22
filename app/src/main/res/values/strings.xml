@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">实时字幕</string>
+
+    <string name="notification_channel_caption">实时字幕服务</string>
+    <string name="notification_channel_caption_desc">播放声音或麦克风音频的实时转写</string>
+    <string name="notification_title_caption">实时字幕运行中</string>
+    <string name="notification_action_stop">停止</string>
+
+    <string name="tile_caption_label">实时字幕</string>
+    <string name="shortcut_quick_caption_short">实时字幕</string>
+    <string name="shortcut_quick_caption_long">开启实时字幕悬浮窗</string>
+    <string name="shortcut_quick_caption_disabled">实时字幕当前不可用</string>
+
+    <string name="error_missing_audio_permission">需要麦克风权限才能开始听写</string>
+    <string name="error_missing_projection_permission">需要屏幕录制权限才能捕获播放声音</string>
+
+    <string name="file_provider_label">实时字幕文件</string>
+</resources>

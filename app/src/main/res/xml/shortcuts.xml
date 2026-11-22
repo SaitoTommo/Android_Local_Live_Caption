@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <shortcut
+        android:enabled="true"
+        android:icon="@drawable/ic_tile_caption"
+        android:shortcutDisabledMessage="@string/shortcut_quick_caption_disabled"
+        android:shortcutId="quick_live_caption"
+        android:shortcutLongLabel="@string/shortcut_quick_caption_long"
+        android:shortcutShortLabel="@string/shortcut_quick_caption_short">
+        <intent
+            android:action="com.localcaption.app.ACTION_QUICK_OVERLAY_CAPTION"
+            android:targetClass="com.localcaption.app.MainActivity"
+            android:targetPackage="com.localcaption.app" />
+    </shortcut>
+
+</shortcuts>

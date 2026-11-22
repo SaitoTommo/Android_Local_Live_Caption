@@ -1,0 +1,18 @@
+# Gradle & Build outputs
+.gradle/
+build/
+app/build/
+.kotlin/
+
+# IDE & Local config
+.idea/
+*.iml
+local.properties
+*.hprof
+.DS_Store
+Thumbs.db
+
+# Prebuilt native AAR binaries & APKs (download via k2-fsa/sherpa-onnx Releases)
+app/libs/*.aar
+*.apk
+*.aab
