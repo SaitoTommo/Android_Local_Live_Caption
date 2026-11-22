@@ -529,13 +529,18 @@ private fun StatusBanner(
             }
 
             if (isActive && !isInitializing && telemetry.lastInferenceMs > 0L) {
+                val audioText = if (telemetry.lastAudioMs > 0L) {
+                    String.format(java.util.Locale.US, "%.1fs 音频", telemetry.lastAudioMs / 1000f)
+                } else {
+                    ""
+                }
                 val rtfText = if (telemetry.lastRtf > 0f) {
-                    String.format(java.util.Locale.US, " · RTF %.2fx", telemetry.lastRtf)
+                    String.format(java.util.Locale.US, "（实时率 %.2fx）", telemetry.lastRtf)
                 } else {
                     ""
                 }
                 Text(
-                    text = "最近推理耗时：${telemetry.lastInferenceMs} ms$rtfText",
+                    text = "最近识别：${audioText}耗时 ${telemetry.lastInferenceMs} ms$rtfText",
                     style = MaterialTheme.typography.bodySmall,
                     color = if (hardwareIsNpuActive) {
                         Color(0xFF2FBF8F)
