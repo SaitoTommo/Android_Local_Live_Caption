@@ -16,8 +16,13 @@
   - **麦克风收音**：直接采集外部环境人声，适用于线下会议、课堂、面对面访谈，主界面一键切换。
 - **多款离线 ASR 模型（应用内一键下载 / 本地导入）**
   - 支持在应用内直接下载或从本地导入模型包，下载与 `.tar.bz2` / `.zip` 解压在应用级后台运行，切换页面不中断，实时展示下载、解压与校验进度。
-- **说话人区分（Speaker Diarization）**
-  - 结合 **Silero VAD** 自动断句 + **3D-Speaker (ERES2Net)** 声纹向量提取与在线余弦聚类，为每段字幕实时标记不同颜色的说话人标签（`说话人 1`、`说话人 2`…），支持在历史详情页一键批量重命名说话人。
+- **说话人区分、合并与整段重识（Speaker Diarization）**
+  - **实时在线区分**：结合 **Silero VAD** 自动断句 + **3D-Speaker (ERES2Net)** 声纹向量提取与在线余弦聚类，实时标记不同颜色的说话人标签（`说话人 1`、`说话人 2`…）。
+  - **整段离线重新识别说话人**：录制时自动流式留存 16kHz 单声道原始音频；在历史详情页点击「重识说话人」，可选择「自动」或指定人数（2~5 人），对整段完整录音进行高通预加重去低频噪声、全局响度归一化、1.6s 滑动窗口声纹提取与**全会话均值去偏**后做**全局层次聚类（AHC）**，大幅消除不同片段背景噪声导致的同一人被拆分的现象。
+  - **合并与重命名**：历史详情页支持一键**合并说话人**（将噪声拆出的冗余说话人合并归并）与批量重命名。
+- **自然分句与开头辅音保护（350ms Pre-Roll VAD）**
+  - 内置持续滚动的原始音频环形缓冲区，语音触发时自动将**开口前 350ms 音频拼接到句首**，避免 `p / t / k / s / sh / f / th / ch` 等能量较弱的开头清辅音被截断；
+  - 连续长句达到上限时，在尾部 1.2s 内自动寻找**声学能量最低谷（自然换气/词间微停顿）**切分，避免把完整单词拦腰截断。
 - **可缩放、可滚动悬浮字幕窗**
   - 固定紧凑高度，新字幕出现时不会反复跳动遮挡视频画面；
   - 内部支持上下滚动回看最近 50 条字幕，处于底部时自动跟随最新一句；
@@ -31,9 +36,9 @@
   - **桌面长按快捷方式（App Shortcuts）**：长按应用图标直接唤起悬浮字幕。
   - **Material You 动态主题色**：Android 12+ 自动跟随系统壁纸主题色，深浅色模式自适应。
   - **权限与后台保活引导**：设置页集成悬浮窗授权、忽略电池优化白名单与国产 ROM 后台锁定指引，并支持切换 **CPU / NNAPI（实验性 NPU）** 推理后端。
-- **历史记录与导出分享**
-  - Room 本地数据库持久化每次转录会话、时间戳、说话人与全文；
-  - 支持标题检索、单条字幕编辑纠错、整场说话人重命名，以及标准 `.srt` / `.txt` 导出与系统分享。
+- **历史记录、转录稿校对与导出分享**
+  - Room 本地数据库持久化每次转录会话、时间戳、说话人、全文与原始录音路径（删除记录时同步清理音频文件）；
+  - 支持标题检索、点击每条字幕右侧编辑按钮**手动修改错别字及切换单句归属说话人**、合并/重命名/整段重识说话人，以及标准 `.srt` / `.txt` 导出与系统分享。
 
 ---
 
@@ -57,15 +62,15 @@
 
 ```mermaid
 flowchart LR
-    A["音频采集<br/>AudioPlaybackCapture / Mic<br/>16kHz Mono PCM"] --> B["Silero VAD<br/>静音过滤 + 分段<br/>+ RMS 实时声波"]
+    A["音频采集<br/>AudioPlaybackCapture / Mic<br/>16kHz Mono PCM + WAV 留存"] --> B["Silero VAD + 350ms Pre-Roll<br/>能量低谷自然切句<br/>+ RMS 实时声波"]
     B --> C["本地 ASR 引擎<br/>Qwen3-ASR / SenseVoice /<br/>Paraformer"]
-    B --> D["声纹聚类<br/>3D-Speaker +<br/>在线余弦相似度"]
+    B --> D["声纹聚类<br/>3D-Speaker +<br/>在线聚类 / 整段离线 AHC 重识"]
     C --> E["字幕段落合并<br/>文本 + 时间轴 + 说话人"]
     D --> E
     E --> F["悬浮字幕窗<br/>可滚动 / 四角缩放"]
     E --> G["App 实时流"]
     E --> H["Room 本地数据库"]
-    H --> I["历史详情 & 编辑<br/>SRT / TXT 导出"]
+    H --> I["历史详情 / 校对 / 合并说话人<br/>SRT / TXT 导出"]
 ```
 
 ---
@@ -128,13 +133,13 @@ gradle :app:assembleDebug
         │   └── java/com/localcaption/app/
         │       ├── LocalCaptionApp.kt
         │       ├── MainActivity.kt
-        │       ├── data/           # Room 数据库、DataStore 设置、Repository
-        │       ├── audio/          # PlaybackAudioCapture、MicAudioCapture
-        │       ├── asr/            # SherpaOnnxBridge、AsrEngine、VadSegmenter、SpeakerDiarizer、ModelManager、TranscriptionPipeline
+        │       ├── data/           # Room 数据库 (v2 平滑迁移)、DataStore 设置、Repository
+        │       ├── audio/          # PlaybackAudioCapture、MicAudioCapture、SessionWavRecorder
+        │       ├── asr/            # SherpaOnnxBridge、AsrEngine、VadSegmenter、SpeakerDiarizer、OfflineSessionRediarizer、ModelManager、TranscriptionPipeline
         │       ├── service/        # CaptionForegroundService、FloatingOverlayManager、CaptionTileService
         │       ├── export/         # SrtExporter、TxtExporter、ExportHelper
-        │       └── ui/             # Jetpack Compose Material 3 界面
-        └── test/                   # 单元测试（SRT/TXT 导出、在线说话人聚类、VAD 切段）
+        │       └── ui/             # Jetpack Compose Material 3 / Material You 界面
+        └── test/                   # 单元测试（SRT/TXT 导出、在线/离线说话人聚类、VAD 切段）
 ```
 
 ---
