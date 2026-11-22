@@ -686,6 +686,7 @@ class CaptionForegroundService : Service() {
             context = this,
             onTogglePause = { togglePauseInternal() },
             onStop = { requestStop() },
+            onOpenMainApp = { openMainApp() },
         ).also { overlay = it }
 
         val captions = pipeline?.recentCaptions?.value.orEmpty()
@@ -709,6 +710,19 @@ class CaptionForegroundService : Service() {
     private fun removeOverlay() {
         overlay?.hide()
         publishState { copy(isOverlayVisible = false) }
+    }
+
+    private fun openMainApp() {
+        val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
+            ?.apply {
+                addFlags(
+                    Intent.FLAG_ACTIVITY_NEW_TASK or
+                        Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                        Intent.FLAG_ACTIVITY_CLEAR_TOP,
+                )
+            } ?: return
+        runCatching { startActivity(launchIntent) }
+            .onFailure { Log.w(TAG, "Unable to open MainActivity from overlay", it) }
     }
 
     // endregion
@@ -1066,21 +1080,13 @@ private class ControllableAudioCaptureSource(
         return true
     }
 
-    /** Resumes capture with the callback captured by the last [start]. */
+    /** Resumes capture into the same callback after [pause]. */
     fun resume(): Boolean {
-        val onSamples = synchronized(lock) {
-            val stored = callback
-            if (stored == null || !paused) {
-                null
-            } else {
-                paused = false
-                stored
-            }
+        val current = synchronized(lock) {
+            if (!paused) return false
+            paused = false
+            callback
         } ?: return false
-        val started = delegate.start(onSamples)
-        if (!started) {
-            synchronized(lock) { paused = true }
-        }
-        return started
+        return delegate.start(current)
     }
 }

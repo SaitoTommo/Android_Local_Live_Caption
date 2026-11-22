@@ -42,6 +42,7 @@ class FloatingOverlayManager(
     private val context: Context,
     private val onTogglePause: () -> Unit,
     private val onStop: () -> Unit,
+    private val onOpenMainApp: () -> Unit = {},
     private val onLockChange: (Boolean) -> Unit = {},
 ) {
 
@@ -59,9 +60,13 @@ class FloatingOverlayManager(
 
     private var rootView: FrameLayout? = null
     private var cardView: LinearLayout? = null
+    private var bubbleView: FrameLayout? = null
+    private var bubbleDotView: View? = null
     private var headerView: LinearLayout? = null
     private var titleView: TextView? = null
     private var audioLevelView: MiniAudioBarsView? = null
+    private var fullscreenButton: ImageView? = null
+    private var minimizeButton: ImageView? = null
     private var lockButton: ImageView? = null
     private var pauseButton: ImageView? = null
     private var stopButton: ImageView? = null
@@ -71,11 +76,18 @@ class FloatingOverlayManager(
     private val cornerHandles = mutableListOf<View>()
 
     private var layoutParams: WindowManager.LayoutParams? = null
+    private var savedCardX: Int = 0
+    private var savedCardY: Int = 0
+    private var savedCardW: Int = 0
+    private var savedCardH: Int = 0
+    private var savedBubbleX: Int = -1
+    private var savedBubbleY: Int = -1
 
     private var settings: AppSettings = AppSettings.DEFAULTS
     private var captions: List<LiveCaption> = emptyList()
     private var renderedIds: Set<Long> = emptySet()
 
+    private var minimized = false
     private var locked = false
     private var paused = false
     private var showing = false
@@ -153,9 +165,12 @@ class FloatingOverlayManager(
         onMain { titleView?.text = title }
     }
 
-    /** Updates the compact 3-bar audio input level meter in the overlay header. */
+    /** Updates the compact 3-bar audio input level meter in the overlay header & bubble dot. */
     fun updateAudioLevel(level: Float) {
-        onMain { audioLevelView?.setLevel(level) }
+        onMain {
+            audioLevelView?.setLevel(level)
+            bubbleDotView?.alpha = if (level > 0.04f) 1f else 0.35f
+        }
     }
 
     // region Window management
@@ -192,9 +207,13 @@ class FloatingOverlayManager(
     private fun clearViewRefs() {
         rootView = null
         cardView = null
+        bubbleView = null
+        bubbleDotView = null
         headerView = null
         titleView = null
         audioLevelView = null
+        fullscreenButton = null
+        minimizeButton = null
         lockButton = null
         pauseButton = null
         stopButton = null
@@ -202,6 +221,7 @@ class FloatingOverlayManager(
         captionsContainer = null
         emptyView = null
         cornerHandles.clear()
+        minimized = false
     }
 
     private fun createLayoutParams(): WindowManager.LayoutParams {
@@ -276,6 +296,18 @@ class FloatingOverlayManager(
         }
         header.addView(titleView)
 
+        fullscreenButton = createHeaderButton(R.drawable.ic_overlay_fullscreen).apply {
+            contentDescription = CONTENT_DESC_FULLSCREEN
+            setOnClickListener { onOpenMainApp() }
+        }
+        header.addView(fullscreenButton)
+
+        minimizeButton = createHeaderButton(R.drawable.ic_overlay_minimize).apply {
+            contentDescription = CONTENT_DESC_MINIMIZE
+            setOnClickListener { setMinimized(true) }
+        }
+        header.addView(minimizeButton)
+
         lockButton = createHeaderButton(
             if (locked) R.drawable.ic_overlay_lock else R.drawable.ic_overlay_unlock,
         ).apply {
@@ -348,10 +380,160 @@ class FloatingOverlayManager(
         }
         updateCornerHandlesVisibility()
 
+        // Minimized floating bubble (hidden until user taps minimize).
+        val bubble = buildBubbleView()
+        bubbleView = bubble
+        root.addView(bubble)
+
         applyCardBackground()
         updatePauseButton()
         updateTitle(DEFAULT_TITLE)
         return root
+    }
+
+    private fun buildBubbleView(): FrameLayout {
+        val bubbleSize = dp(BUBBLE_SIZE_DP)
+        val container = FrameLayout(context).apply {
+            visibility = View.GONE
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(cardColor(settings.overlayBgAlpha.coerceAtLeast(0.82f)))
+                setStroke(dp(1.5f), CARD_STROKE_COLOR)
+            }
+            contentDescription = CONTENT_DESC_EXPAND_BUBBLE
+            layoutParams = FrameLayout.LayoutParams(bubbleSize, bubbleSize)
+        }
+
+        val icon = ImageView(context).apply {
+            setImageResource(R.drawable.ic_tile_caption)
+            setColorFilter(TEXT_COLOR)
+            scaleType = ImageView.ScaleType.CENTER_INSIDE
+            val pad = dp(12)
+            setPadding(pad, pad, pad, pad)
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT,
+            )
+        }
+        container.addView(icon)
+
+        val dotSize = dp(8)
+        val dot = View(context).apply {
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(Color.parseColor("#2FBF8F"))
+            }
+            alpha = 0.35f
+            layoutParams = FrameLayout.LayoutParams(dotSize, dotSize, Gravity.TOP or Gravity.END).apply {
+                topMargin = dp(6)
+                marginEnd = dp(6)
+            }
+        }
+        bubbleDotView = dot
+        container.addView(dot)
+
+        attachBubbleTouchHandler(container)
+        return container
+    }
+
+    private fun attachBubbleTouchHandler(bubble: View) {
+        val touchSlop = dp(6)
+        bubble.setOnTouchListener(object : View.OnTouchListener {
+            private var startX = 0
+            private var startY = 0
+            private var downX = 0f
+            private var downY = 0f
+            private var dragged = false
+
+            override fun onTouch(view: View, event: MotionEvent): Boolean {
+                val params = layoutParams ?: return false
+                val root = rootView ?: return false
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> {
+                        startX = params.x
+                        startY = params.y
+                        downX = event.rawX
+                        downY = event.rawY
+                        dragged = false
+                        return true
+                    }
+
+                    MotionEvent.ACTION_MOVE -> {
+                        val dx = event.rawX - downX
+                        val dy = event.rawY - downY
+                        if (!dragged && (abs(dx) > touchSlop || abs(dy) > touchSlop)) {
+                            dragged = true
+                        }
+                        if (dragged) {
+                            params.x = (startX + dx).roundToInt()
+                            params.y = (startY + dy).roundToInt()
+                            clampPositionToScreen(params)
+                            savedBubbleX = params.x
+                            savedBubbleY = params.y
+                            runCatching { windowManager.updateViewLayout(root, params) }
+                        }
+                        return true
+                    }
+
+                    MotionEvent.ACTION_UP -> {
+                        if (!dragged) {
+                            setMinimized(false)
+                        }
+                        return true
+                    }
+
+                    MotionEvent.ACTION_CANCEL -> return true
+                }
+                return false
+            }
+        })
+    }
+
+    private fun setMinimized(minimize: Boolean) {
+        if (minimized == minimize) return
+        val params = layoutParams ?: return
+        val root = rootView ?: return
+        minimized = minimize
+
+        if (minimize) {
+            savedCardX = params.x
+            savedCardY = params.y
+            savedCardW = if (params.width > 0) params.width else root.width
+            savedCardH = if (params.height > 0) params.height else root.height
+
+            val bubbleSize = dp(BUBBLE_SIZE_DP)
+            cardView?.visibility = View.GONE
+            cornerHandles.forEach { it.visibility = View.GONE }
+            bubbleView?.visibility = View.VISIBLE
+
+            params.width = bubbleSize
+            params.height = bubbleSize
+            if (savedBubbleX >= 0 && savedBubbleY >= 0) {
+                params.x = savedBubbleX
+                params.y = savedBubbleY
+            } else {
+                val (screenW, _) = screenSize()
+                params.x = (screenW - bubbleSize - dp(12)).coerceAtLeast(0)
+                params.y = savedCardY
+            }
+            clampPositionToScreen(params)
+            runCatching { windowManager.updateViewLayout(root, params) }
+        } else {
+            savedBubbleX = params.x
+            savedBubbleY = params.y
+
+            bubbleView?.visibility = View.GONE
+            cardView?.visibility = View.VISIBLE
+            updateCornerHandlesVisibility()
+
+            params.width = savedCardW.coerceAtLeast(dp(MIN_CARD_WIDTH_DP))
+            params.height = savedCardH.coerceAtLeast(dp(MIN_CARD_HEIGHT_DP))
+            params.x = savedCardX
+            params.y = savedCardY
+            clampPositionToScreen(params)
+            runCatching { windowManager.updateViewLayout(root, params) }
+            captionsScrollView?.post { captionsScrollView?.fullScroll(View.FOCUS_DOWN) }
+        }
     }
 
     private fun createHeaderButton(iconRes: Int): ImageView = ImageView(context).apply {
@@ -384,7 +566,7 @@ class FloatingOverlayManager(
     }
 
     private fun updateCornerHandlesVisibility() {
-        val visibility = if (locked) View.GONE else View.VISIBLE
+        val visibility = if (locked || minimized) View.GONE else View.VISIBLE
         cornerHandles.forEach { it.visibility = visibility }
     }
 
@@ -678,50 +860,7 @@ class FloatingOverlayManager(
 
     // endregion
 
-    // region Corner grip view
-
-    private inner class CornerGripView(
-        context: Context,
-        private val corner: ResizeCorner,
-    ) : View(context) {
-
-        private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = CORNER_GRIP_COLOR
-            style = Paint.Style.STROKE
-            strokeWidth = dp(2).toFloat()
-            strokeCap = Paint.Cap.ROUND
-        }
-
-        override fun onDraw(canvas: Canvas) {
-            super.onDraw(canvas)
-            val inset = dp(4).toFloat()
-            val len = dp(8).toFloat()
-            val w = width.toFloat()
-            val h = height.toFloat()
-
-            when (corner) {
-                ResizeCorner.TOP_LEFT -> {
-                    canvas.drawLine(inset, inset + len, inset, inset, paint)
-                    canvas.drawLine(inset, inset, inset + len, inset, paint)
-                }
-
-                ResizeCorner.TOP_RIGHT -> {
-                    canvas.drawLine(w - inset - len, inset, w - inset, inset, paint)
-                    canvas.drawLine(w - inset, inset, w - inset, inset + len, paint)
-                }
-
-                ResizeCorner.BOTTOM_LEFT -> {
-                    canvas.drawLine(inset, h - inset - len, inset, h - inset, paint)
-                    canvas.drawLine(inset, h - inset, inset + len, h - inset, paint)
-                }
-
-                ResizeCorner.BOTTOM_RIGHT -> {
-                    canvas.drawLine(w - inset - len, h - inset, w - inset, h - inset, paint)
-                    canvas.drawLine(w - inset, h - inset - len, w - inset, h - inset, paint)
-                }
-            }
-        }
-    }
+    // region Mini audio indicator view
 
     private inner class MiniAudioBarsView(context: Context) : View(context) {
         private var level = 0f
@@ -801,11 +940,16 @@ class FloatingOverlayManager(
         const val DEFAULT_TITLE = "实时字幕"
         const val EMPTY_TEXT = "等待字幕…"
 
+        const val CONTENT_DESC_FULLSCREEN = "回到主界面"
+        const val CONTENT_DESC_MINIMIZE = "最小化为悬浮球"
+        const val CONTENT_DESC_EXPAND_BUBBLE = "点击展开实时字幕"
         const val CONTENT_DESC_LOCK = "锁定浮窗"
         const val CONTENT_DESC_PAUSE = "暂停字幕"
         const val CONTENT_DESC_RESUME = "继续字幕"
         const val CONTENT_DESC_STOP = "停止字幕"
         const val CONTENT_DESC_RESIZE = "拖拽缩放浮窗"
+
+        const val BUBBLE_SIZE_DP = 48
 
         const val TITLE_TEXT_SP = 12f
         const val SECONDARY_TEXT_SCALE = 0.6f
@@ -836,7 +980,6 @@ class FloatingOverlayManager(
         val SHADOW_COLOR = 0xAA000000.toInt()
         val CARD_STROKE_COLOR = 0x33FFFFFF
         val HEADER_BUTTON_COLOR = 0x33FFFFFF
-        val CORNER_GRIP_COLOR = 0x99FFFFFF.toInt()
 
         val BADGE_COLORS = intArrayOf(
             Color.parseColor("#4C8DFF"),
