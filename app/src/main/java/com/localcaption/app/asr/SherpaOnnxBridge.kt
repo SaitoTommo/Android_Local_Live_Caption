@@ -799,6 +799,9 @@ interface SherpaVadHandle : AutoCloseable {
     /** Drains every finished speech segment. */
     fun flushSegments(): List<FloatArray>
 
+    /** Forces the detector to finalize any currently open speech segment. */
+    fun flush() {}
+
     /** Clears the detector state so a new session starts with an empty buffer. */
     fun reset()
 
@@ -872,6 +875,19 @@ private class SherpaVad(
             segments += popSegment() ?: break
         }
         return segments
+    }
+
+    override fun flush() {
+        synchronized(lock) {
+            if (closed) return
+            val flushMethod = detector.javaClass.methods.firstOrNull {
+                it.name == "flush" && it.parameterCount == 0
+            }
+            if (flushMethod != null) {
+                runCatching { flushMethod.invoke(detector) }
+                    .onFailure { Log.w(TAG, "VAD flush failed", it) }
+            }
+        }
     }
 
     override fun reset() {

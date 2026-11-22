@@ -278,6 +278,28 @@ fun SettingsScreen() {
 
         SettingsSection("断句 (VAD)") {
             SliderRow(
+                title = "人声检测阈值（抗 BGM）",
+                valueText = String.format(Locale.US, "%.2f", current.vadThreshold),
+                value = current.vadThreshold,
+                valueRange = 0.25f..0.85f,
+                onValueChange = {
+                    preview(current.copy(vadThreshold = it))
+                },
+                onValueChangeFinished = { commit() },
+                inputValue = String.format(Locale.US, "%.2f", current.vadThreshold),
+                inputUnit = "",
+                inputRangeHint = "范围：0.20 – 0.90（视频有 BGM 不出字时建议调至 0.60–0.75）",
+                isDecimal = true,
+                onDirectInput = { typed ->
+                    persist(current.copy(vadThreshold = typed.coerceIn(0.20f, 0.90f)))
+                },
+            )
+            Text(
+                text = "视频有持续 BGM 背景音乐导致长时间不出字时，可适当调高此阈值（如 0.60–0.75）过滤音乐，并将下方「单句最长时长」调短至 4–6 秒。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            SliderRow(
                 title = "静音断句时长",
                 valueText = "${current.vadSilenceMs} ms",
                 value = current.vadSilenceMs.toFloat(),

@@ -32,6 +32,7 @@ data class AppSettings(
     val executionProvider: String = PROVIDER_CPU,
     val enableDiarization: Boolean = true,
     val diarizationThreshold: Float = 0.58f,
+    val vadThreshold: Float = 0.50f,
     val vadSilenceMs: Int = 600,
     val preRollSilenceRatio: Float = 0.30f,
     val maxSegmentDurationMs: Int = 10_000,
@@ -82,6 +83,7 @@ fun AppSettings.sanitized(): AppSettings = copy(
         AppSettings.PROVIDER_CPU
     },
     diarizationThreshold = diarizationThreshold.coerceIn(0f, 1f),
+    vadThreshold = vadThreshold.coerceIn(0.20f, 0.90f),
     vadSilenceMs = vadSilenceMs.coerceIn(
         AppSettings.MIN_VAD_SILENCE_MS,
         AppSettings.MAX_VAD_SILENCE_MS,

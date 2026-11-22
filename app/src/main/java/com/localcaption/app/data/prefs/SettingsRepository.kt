@@ -52,6 +52,7 @@ class SettingsRepository(context: Context) {
             preferences[Keys.EXECUTION_PROVIDER] = sanitized.executionProvider
             preferences[Keys.ENABLE_DIARIZATION] = sanitized.enableDiarization
             preferences[Keys.DIARIZATION_THRESHOLD] = sanitized.diarizationThreshold
+            preferences[Keys.VAD_THRESHOLD] = sanitized.vadThreshold
             preferences[Keys.VAD_SILENCE_MS] = sanitized.vadSilenceMs
             preferences[Keys.PRE_ROLL_SILENCE_RATIO] = sanitized.preRollSilenceRatio
             preferences[Keys.MAX_SEGMENT_DURATION_MS] = sanitized.maxSegmentDurationMs
@@ -162,6 +163,7 @@ class SettingsRepository(context: Context) {
             enableDiarization = this[Keys.ENABLE_DIARIZATION] ?: defaults.enableDiarization,
             diarizationThreshold = this[Keys.DIARIZATION_THRESHOLD]
                 ?: defaults.diarizationThreshold,
+            vadThreshold = this[Keys.VAD_THRESHOLD] ?: defaults.vadThreshold,
             vadSilenceMs = this[Keys.VAD_SILENCE_MS] ?: defaults.vadSilenceMs,
             preRollSilenceRatio = this[Keys.PRE_ROLL_SILENCE_RATIO] ?: defaults.preRollSilenceRatio,
             maxSegmentDurationMs = this[Keys.MAX_SEGMENT_DURATION_MS]
@@ -185,6 +187,7 @@ class SettingsRepository(context: Context) {
         val EXECUTION_PROVIDER = stringPreferencesKey("execution_provider")
         val ENABLE_DIARIZATION = booleanPreferencesKey("enable_diarization")
         val DIARIZATION_THRESHOLD = floatPreferencesKey("diarization_threshold")
+        val VAD_THRESHOLD = floatPreferencesKey("vad_threshold")
         val VAD_SILENCE_MS = intPreferencesKey("vad_silence_ms")
         val PRE_ROLL_SILENCE_RATIO = floatPreferencesKey("pre_roll_silence_ratio")
         val MAX_SEGMENT_DURATION_MS = intPreferencesKey("max_segment_duration_ms")

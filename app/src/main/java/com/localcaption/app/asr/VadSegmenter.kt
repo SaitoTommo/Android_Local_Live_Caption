@@ -94,6 +94,7 @@ class VadSegmenter(
     private var lastEmittedEndSample = 0L
 
     private var sileroProcessedSamples = 0L
+    private var sileroContinuousSpeechSamples = 0L
     private var sileroFailureLogged = false
 
     /** `true` when the Silero model drove segmentation for this instance. */
@@ -153,6 +154,7 @@ class VadSegmenter(
         processedSamples = 0L
         lastEmittedEndSample = 0L
         sileroProcessedSamples = 0L
+        sileroContinuousSpeechSamples = 0L
         sileroFailureLogged = false
         runCatching { vadHandle?.reset() }
     }
@@ -169,8 +171,24 @@ class VadSegmenter(
             .isSuccess
         if (accepted) {
             sileroProcessedSamples += samples.size
+            if (handle.isSpeechDetected()) {
+                sileroContinuousSpeechSamples += samples.size
+            } else {
+                sileroContinuousSpeechSamples = 0L
+            }
         }
-        return drainSilero(handle, sileroProcessedSamples)
+        val drained = drainSilero(handle, sileroProcessedSamples).toMutableList()
+        if (drained.isNotEmpty()) {
+            sileroContinuousSpeechSamples = 0L
+        } else if (sileroContinuousSpeechSamples >= maxSamplesPerSegment) {
+            // BGM watchdog: continuous background music can keep Silero VAD triggered
+            // indefinitely; force-flush so subtitles always emit on time.
+            runCatching { handle.flush() }.onFailure { logSileroFailure(it) }
+            val forced = drainSilero(handle, sileroProcessedSamples)
+            drained += forced
+            sileroContinuousSpeechSamples = 0L
+        }
+        return drained
     }
 
     private fun drainSilero(
