@@ -185,7 +185,6 @@ class ModelManager(
         AsrModelType.QWEN3_ASR_0_6B_INT8 -> QWEN3_ASR_0_6B_INT8
         AsrModelType.SENSE_VOICE_SMALL_INT8 -> SENSE_VOICE_SMALL_INT8
         AsrModelType.PARAFORMER_ZH_SMALL_INT8 -> PARAFORMER_ZH_SMALL_INT8
-        AsrModelType.WHISPER_TINY_INT8 -> WHISPER_TINY_INT8
     }
 
     /** Directory of [spec] inside [modelsDir]. */
@@ -741,7 +740,6 @@ class ModelManager(
         const val ID_QWEN3_ASR_0_6B_INT8 = "qwen3_asr_0_6b_int8"
         const val ID_SENSE_VOICE_SMALL_INT8 = "sense_voice_small_int8"
         const val ID_PARAFORMER_ZH_SMALL_INT8 = "paraformer_zh_small_int8"
-        const val ID_WHISPER_TINY_INT8 = "whisper_tiny_int8"
         const val ID_SILERO_VAD = "silero_vad"
         const val ID_SPEAKER_EMBEDDING_3DSPEAKER = "speaker_embedding_3dspeaker"
 
@@ -793,19 +791,6 @@ class ModelManager(
             asrModelType = AsrModelType.PARAFORMER_ZH_SMALL_INT8,
         )
 
-        /** Whisper Tiny, lightweight multilingual model (great for English videos). */
-        val WHISPER_TINY_INT8: ModelSpec = ModelSpec(
-            id = ID_WHISPER_TINY_INT8,
-            displayName = AsrModelType.WHISPER_TINY_INT8.displayName,
-            directoryName = AsrModelType.WHISPER_TINY_INT8.modelDirName,
-            downloadUrl = "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/" +
-                "sherpa-onnx-whisper-tiny.tar.bz2",
-            archiveType = ModelArchiveType.TAR_BZ2,
-            requiredFiles = listOf("tiny-tokens.txt"),
-            approxSizeBytes = 115_000_000L,
-            asrModelType = AsrModelType.WHISPER_TINY_INT8,
-        )
-
         /** Silero VAD used to split the stream into speech segments. */
         val SILERO_VAD: ModelSpec = ModelSpec(
             id = ID_SILERO_VAD,
@@ -837,7 +822,6 @@ class ModelManager(
             QWEN3_ASR_0_6B_INT8,
             SENSE_VOICE_SMALL_INT8,
             PARAFORMER_ZH_SMALL_INT8,
-            WHISPER_TINY_INT8,
             SILERO_VAD,
             SPEAKER_EMBEDDING_3DSPEAKER,
         )

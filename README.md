@@ -45,7 +45,6 @@
 | :--- | :--- | :--- | :--- |
 | **Paraformer-zh Small (INT8)** | ~80 MB | 非自回归中英双语，**单句 < 0.1 秒** | 中文为主、夹杂英文的视频/会议，追求极致实时性 |
 | **SenseVoice Small (INT8)** *(推荐)* | ~238 MB | 非自回归多语种（中/英/日/韩/粤），**单句 ~0.1–0.3 秒** | 速度与准确率最均衡的日常主力模型 |
-| **Whisper Tiny (INT8)** | ~115 MB | 轻量多语种编码-解码，**单句 ~0.3–0.6 秒** | 纯英文新闻、播客、外语视频 |
 | **Qwen3-ASR 0.6B (INT8)** | ~839 MB | 自回归语音大模型，标点与复杂语境理解更强 | 对准确率要求高、可接受 1.5–4 秒单句延迟的场景 |
 | **Silero VAD** *(辅助)* | ~2 MB | 精准语音端点检测与断句 | 建议安装，提升断句准确度与省电表现 |
 | **3D-Speaker (ERES2Net)** *(辅助)* | ~40 MB | 端侧声纹向量提取 | 开启「说话人分离」功能时安装 |
@@ -59,7 +58,7 @@
 ```mermaid
 flowchart LR
     A["音频采集<br/>AudioPlaybackCapture / Mic<br/>16kHz Mono PCM"] --> B["Silero VAD<br/>静音过滤 + 分段<br/>+ RMS 实时声波"]
-    B --> C["本地 ASR 引擎<br/>Qwen3-ASR / SenseVoice /<br/>Paraformer / Whisper"]
+    B --> C["本地 ASR 引擎<br/>Qwen3-ASR / SenseVoice /<br/>Paraformer"]
     B --> D["声纹聚类<br/>3D-Speaker +<br/>在线余弦相似度"]
     C --> E["字幕段落合并<br/>文本 + 时间轴 + 说话人"]
     D --> E
@@ -156,4 +155,4 @@ gradle :app:assembleDebug
 ## 致谢
 
 - [k2-fsa/sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) — 优秀的跨平台端侧离线语音推理框架
-- [Qwen3-ASR](https://github.com/QwenLM/Qwen3-ASR) / [SenseVoice](https://github.com/FunAudioLLM/SenseVoice) / [FunASR Paraformer](https://github.com/modelscope/FunASR) / [Whisper](https://github.com/openai/whisper) / [Silero VAD](https://github.com/snakers4/silero-vad) / [3D-Speaker](https://github.com/modelscope/3D-Speaker)
+- [Qwen3-ASR](https://github.com/QwenLM/Qwen3-ASR) / [SenseVoice](https://github.com/FunAudioLLM/SenseVoice) / [FunASR Paraformer](https://github.com/modelscope/FunASR) / [Silero VAD](https://github.com/snakers4/silero-vad) / [3D-Speaker](https://github.com/modelscope/3D-Speaker)

@@ -29,10 +29,4 @@ enum class AsrModelType(
         modelDirName = "sherpa-onnx-paraformer-zh-small-int8",
         sampleRate = 16_000,
     ),
-
-    WHISPER_TINY_INT8(
-        displayName = "Whisper Tiny (轻量多语)",
-        modelDirName = "sherpa-onnx-whisper-tiny-int8",
-        sampleRate = 16_000,
-    ),
 }

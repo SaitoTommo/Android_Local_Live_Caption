@@ -197,32 +197,6 @@ object SherpaOnnxBridge {
                     }
                     setProperty(modelConfig, listOf("tokens"), tokensFile.absolutePath)
                 }
-
-                AsrModelType.WHISPER_TINY_INT8 -> {
-                    val whisperClass = loadClass("OfflineWhisperModelConfig")
-                    if (whisperClass == null) {
-                        Log.d(TAG, "OfflineWhisperModelConfig not available")
-                        return null
-                    }
-                    val encoder = findOnnxByKeyword(modelDir, "encoder")
-                    val decoder = findOnnxByKeyword(modelDir, "decoder")
-                    val tokensFile = modelDir.listFiles()
-                        ?.firstOrNull { it.isFile && it.name.endsWith("tokens.txt", ignoreCase = true) }
-                        ?: File(modelDir, "tiny-tokens.txt")
-                    if (encoder == null || decoder == null || !tokensFile.isFile) {
-                        Log.w(TAG, "Whisper model directory is incomplete: $modelDir")
-                        return null
-                    }
-                    val whisper = bestEffortNewInstance(whisperClass) ?: return null
-                    setProperty(whisper, listOf("encoder"), encoder.absolutePath)
-                    setProperty(whisper, listOf("decoder"), decoder.absolutePath)
-                    setProperty(whisper, listOf("language"), normalizeLanguage(language))
-                    setProperty(whisper, listOf("task"), "transcribe")
-                    if (!setProperty(modelConfig, listOf("whisper"), whisper)) {
-                        setPropertyByType(modelConfig, whisper)
-                    }
-                    setProperty(modelConfig, listOf("tokens"), tokensFile.absolutePath)
-                }
             }
 
             setProperty(modelConfig, listOf("numThreads"), numThreads.coerceAtLeast(1))

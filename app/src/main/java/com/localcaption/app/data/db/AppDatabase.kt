@@ -20,14 +20,14 @@ class AppTypeConverters {
 
     @TypeConverter
     fun toAudioSourceType(value: String): AudioSourceType =
-        AudioSourceType.valueOf(value)
+        runCatching { AudioSourceType.valueOf(value) }.getOrDefault(AudioSourceType.PLAYBACK_CAPTURE)
 
     @TypeConverter
     fun fromAsrModelType(value: AsrModelType): String = value.name
 
     @TypeConverter
     fun toAsrModelType(value: String): AsrModelType =
-        AsrModelType.valueOf(value)
+        runCatching { AsrModelType.valueOf(value) }.getOrDefault(AsrModelType.QWEN3_ASR_0_6B_INT8)
 }
 
 @Database(
