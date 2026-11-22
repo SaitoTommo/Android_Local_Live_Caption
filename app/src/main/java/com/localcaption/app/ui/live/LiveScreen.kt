@@ -95,7 +95,11 @@ import kotlinx.coroutines.launch
  * turns the floating overlay on
  */
 @Composable
-fun LiveScreen(onOpenModels: () -> Unit, quickOverlayRequest: Int = 0) {
+fun LiveScreen(
+    onOpenModels: () -> Unit,
+    quickOverlayRequest: Int = 0,
+    onConsumeQuickOverlayRequest: () -> Unit = {},
+) {
     val context = LocalContext.current
     val app = rememberAppContainer()
     val scope = rememberCoroutineScope()
@@ -217,6 +221,7 @@ fun LiveScreen(onOpenModels: () -> Unit, quickOverlayRequest: Int = 0) {
     // Launcher long-press shortcut / Quick Settings tile: start (or reveal) the overlay.
     LaunchedEffect(quickOverlayRequest) {
         if (quickOverlayRequest <= 0) return@LaunchedEffect
+        onConsumeQuickOverlayRequest()
         if (isActive) {
             if (!serviceState.isOverlayVisible) {
                 CaptionForegroundService.toggleOverlay(context)
@@ -291,7 +296,7 @@ fun LiveScreen(onOpenModels: () -> Unit, quickOverlayRequest: Int = 0) {
             Button(
                 onClick = {
                     if (isActive) {
-                        CaptionForegroundService.stop(context)
+                        CaptionForegroundService.stop(context, promptSaveDialog = true)
                     } else {
                         startCapture()
                     }

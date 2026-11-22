@@ -45,7 +45,10 @@ class MainActivity : ComponentActivity() {
                     color = MaterialTheme.colorScheme.background,
                 ) {
                     val quickOverlayRequest by quickOverlayRequests.collectAsState()
-                    AppNavHost(quickOverlayRequest = quickOverlayRequest)
+                    AppNavHost(
+                        quickOverlayRequest = quickOverlayRequest,
+                        onConsumeQuickOverlayRequest = { quickOverlayRequests.value = 0 },
+                    )
                 }
             }
         }
@@ -58,8 +61,14 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleIntent(intent: Intent?) {
-        if (intent?.action == ACTION_QUICK_OVERLAY_CAPTION) {
+        if (intent == null) return
+        val launchedFromHistory = (intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) != 0
+        if (!launchedFromHistory && intent.action == ACTION_QUICK_OVERLAY_CAPTION) {
             quickOverlayRequests.update { it + 1 }
+            // Clear the action immediately so re-opening the app from recents or
+            // returning to the Activity never replays the quick-start prompt.
+            intent.action = Intent.ACTION_MAIN
+            setIntent(Intent(this, MainActivity::class.java).setAction(Intent.ACTION_MAIN))
         }
     }
 

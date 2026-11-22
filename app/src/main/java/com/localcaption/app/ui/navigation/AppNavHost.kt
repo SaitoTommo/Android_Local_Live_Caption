@@ -70,6 +70,7 @@ private enum class TopLevelDestination(
 fun AppNavHost(
     navController: NavHostController = rememberNavController(),
     quickOverlayRequest: Int = 0,
+    onConsumeQuickOverlayRequest: () -> Unit = {},
 ) {
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
@@ -125,6 +126,7 @@ fun AppNavHost(
                         }
                     },
                     quickOverlayRequest = quickOverlayRequest,
+                    onConsumeQuickOverlayRequest = onConsumeQuickOverlayRequest,
                 )
             }
 

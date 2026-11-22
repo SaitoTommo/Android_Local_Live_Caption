@@ -163,7 +163,9 @@ class CaptionForegroundService : Service() {
                 )
             }
 
-            ACTION_STOP -> requestStop()
+            ACTION_STOP -> requestStop(
+                promptSaveDialog = intent.getBooleanExtra(EXTRA_PROMPT_SAVE_DIALOG, false),
+            )
             ACTION_TOGGLE_PAUSE -> togglePauseInternal()
             ACTION_TOGGLE_OVERLAY -> toggleOverlayInternal()
         }
@@ -418,15 +420,15 @@ class CaptionForegroundService : Service() {
         }
     }
 
-    private fun requestStop() {
+    private fun requestStop(promptSaveDialog: Boolean = false) {
         if (stopping) return
         if (pipeline == null && !starting) {
             sessionJobs.forEach { it.cancel() }
             sessionJobs.clear()
             removeOverlay()
             ServiceStateHolder.reset(
-            completedSession = ServiceStateHolder.state.value.completedSession,
-        )
+                completedSession = ServiceStateHolder.state.value.completedSession,
+            )
             stopForegroundAndSelf()
             return
         }
@@ -460,7 +462,7 @@ class CaptionForegroundService : Service() {
         serviceScope.launch {
             cleanupSession(currentPipeline, currentCapture, currentSessionId, currentProjection)
 
-            val segmentCount = if (currentSessionId != 0L) {
+            val segmentCount = if (promptSaveDialog && currentSessionId != 0L) {
                 runCatching { app.transcriptionRepository.segmentCount(currentSessionId) }
                     .getOrDefault(0)
             } else {
@@ -486,7 +488,7 @@ class CaptionForegroundService : Service() {
             sessionJobs.clear()
             removeOverlay()
 
-            val prompt = if (currentSessionId != 0L) {
+            val prompt = if (promptSaveDialog && currentSessionId != 0L) {
                 CompletedSessionPrompt(
                     sessionId = currentSessionId,
                     defaultTitle = currentSessionTitle.ifBlank { "实时字幕记录" },
@@ -890,6 +892,8 @@ class CaptionForegroundService : Service() {
         private const val EXTRA_PROJECTION_DATA = "com.localcaption.app.extra.PROJECTION_DATA"
         private const val EXTRA_AUTO_SHOW_OVERLAY =
             "com.localcaption.app.extra.AUTO_SHOW_OVERLAY"
+        private const val EXTRA_PROMPT_SAVE_DIALOG =
+            "com.localcaption.app.extra.PROMPT_SAVE_DIALOG"
 
         /**
          * Process-wide observable state of the caption service.
@@ -953,9 +957,24 @@ class CaptionForegroundService : Service() {
                 .onFailure { Log.e(TAG, "Unable to start the playback capture service", it) }
         }
 
-        /** Stops the running session and the service. */
-        fun stop(context: Context) {
-            sendCommand(context, ACTION_STOP, stopServiceOnFailure = true)
+        /**
+         * Stops the running session and the service.
+         *
+         * @param promptSaveDialog only `true` when stopped from the main LiveScreen button;
+         * stops from the floating overlay, notification or Quick Settings tile save silently
+         * with the default title.
+         */
+        fun stop(context: Context, promptSaveDialog: Boolean = false) {
+            val intent = Intent(context, CaptionForegroundService::class.java)
+                .setAction(ACTION_STOP)
+                .putExtra(EXTRA_PROMPT_SAVE_DIALOG, promptSaveDialog)
+            runCatching { context.startService(intent) }
+                .onFailure {
+                    Log.w(TAG, "Unable to send $ACTION_STOP", it)
+                    runCatching {
+                        context.stopService(Intent(context, CaptionForegroundService::class.java))
+                    }
+                }
         }
 
         /** Pauses or resumes audio capture without ending the session. */
