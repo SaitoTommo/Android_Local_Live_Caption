@@ -17,9 +17,11 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.FrameLayout
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import com.localcaption.app.R
 import com.localcaption.app.asr.LiveCaption
 import com.localcaption.app.data.prefs.AppSettings
 import com.localcaption.app.data.prefs.sanitized
@@ -60,9 +62,9 @@ class FloatingOverlayManager(
     private var headerView: LinearLayout? = null
     private var titleView: TextView? = null
     private var audioLevelView: MiniAudioBarsView? = null
-    private var lockButton: TextView? = null
-    private var pauseButton: TextView? = null
-    private var stopButton: TextView? = null
+    private var lockButton: ImageView? = null
+    private var pauseButton: ImageView? = null
+    private var stopButton: ImageView? = null
     private var captionsScrollView: ScrollView? = null
     private var captionsContainer: LinearLayout? = null
     private var emptyView: TextView? = null
@@ -274,24 +276,28 @@ class FloatingOverlayManager(
         }
         header.addView(titleView)
 
-        lockButton = createHeaderButton(if (locked) ICON_UNLOCKED else ICON_LOCKED).apply {
+        lockButton = createHeaderButton(
+            if (locked) R.drawable.ic_overlay_lock else R.drawable.ic_overlay_unlock,
+        ).apply {
             contentDescription = CONTENT_DESC_LOCK
             setOnClickListener {
                 locked = !locked
-                this.text = if (locked) ICON_UNLOCKED else ICON_LOCKED
+                setImageResource(
+                    if (locked) R.drawable.ic_overlay_lock else R.drawable.ic_overlay_unlock,
+                )
                 updateCornerHandlesVisibility()
                 onLockChange(locked)
             }
         }
         header.addView(lockButton)
 
-        pauseButton = createHeaderButton(ICON_PAUSE).apply {
+        pauseButton = createHeaderButton(R.drawable.ic_overlay_pause).apply {
             contentDescription = CONTENT_DESC_PAUSE
             setOnClickListener { onTogglePause() }
         }
         header.addView(pauseButton)
 
-        stopButton = createHeaderButton(ICON_STOP).apply {
+        stopButton = createHeaderButton(R.drawable.ic_overlay_close).apply {
             contentDescription = CONTENT_DESC_STOP
             setOnClickListener { onStop() }
         }
@@ -348,11 +354,12 @@ class FloatingOverlayManager(
         return root
     }
 
-    private fun createHeaderButton(label: String): TextView = TextView(context).apply {
-        text = label
-        setTextColor(TEXT_COLOR)
-        setTextSize(TypedValue.COMPLEX_UNIT_SP, HEADER_BUTTON_TEXT_SP)
-        gravity = Gravity.CENTER
+    private fun createHeaderButton(iconRes: Int): ImageView = ImageView(context).apply {
+        setImageResource(iconRes)
+        setColorFilter(TEXT_COLOR)
+        scaleType = ImageView.ScaleType.CENTER_INSIDE
+        val pad = dp(5)
+        setPadding(pad, pad, pad, pad)
         background = roundedBackground(HEADER_BUTTON_COLOR, 10f)
         isClickable = true
         isFocusable = true
@@ -636,7 +643,9 @@ class FloatingOverlayManager(
     }
 
     private fun updatePauseButton() {
-        pauseButton?.text = if (paused) ICON_RESUME else ICON_PAUSE
+        pauseButton?.setImageResource(
+            if (paused) R.drawable.ic_overlay_play else R.drawable.ic_overlay_pause,
+        )
         pauseButton?.contentDescription = if (paused) CONTENT_DESC_RESUME else CONTENT_DESC_PAUSE
     }
 
@@ -792,12 +801,6 @@ class FloatingOverlayManager(
         const val DEFAULT_TITLE = "实时字幕"
         const val EMPTY_TEXT = "等待字幕…"
 
-        const val ICON_LOCKED = "🔒"
-        const val ICON_UNLOCKED = "🔓"
-        const val ICON_PAUSE = "⏸"
-        const val ICON_RESUME = "▶"
-        const val ICON_STOP = "✕"
-
         const val CONTENT_DESC_LOCK = "锁定浮窗"
         const val CONTENT_DESC_PAUSE = "暂停字幕"
         const val CONTENT_DESC_RESUME = "继续字幕"
@@ -805,7 +808,6 @@ class FloatingOverlayManager(
         const val CONTENT_DESC_RESIZE = "拖拽缩放浮窗"
 
         const val TITLE_TEXT_SP = 12f
-        const val HEADER_BUTTON_TEXT_SP = 13f
         const val SECONDARY_TEXT_SCALE = 0.6f
         const val BADGE_TEXT_SCALE = 0.55f
         const val LINE_SPACING_MULTIPLIER = 1.15f

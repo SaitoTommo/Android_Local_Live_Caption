@@ -1,11 +1,15 @@
 package com.localcaption.app.ui.theme
 
+import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.dynamicDarkColorScheme
+import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 
 private val LightColors = lightColorScheme(
     primary = Color(0xFF2F5BD8),
@@ -64,16 +68,26 @@ private val DarkColors = darkColorScheme(
 /**
  * Material 3 theme of LocalLiveCaption.
  *
- * The palette is a calm blue/teal pair that keeps captions readable in bright and dark
- * environments; dynamic color is intentionally not used so speaker colors stay stable.
+ * Uses Material You dynamic colors on Android 12+ so the UI matches the device's system
+ * wallpaper palette, falling back to the calm blue/teal palette on Android 10-11.
  */
 @Composable
 fun LocalLiveCaptionTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
+    dynamicColor: Boolean = true,
     content: @Composable () -> Unit,
 ) {
+    val colorScheme = when {
+        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
+            val context = LocalContext.current
+            if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+        }
+
+        darkTheme -> DarkColors
+        else -> LightColors
+    }
     MaterialTheme(
-        colorScheme = if (darkTheme) DarkColors else LightColors,
+        colorScheme = colorScheme,
         content = content,
     )
 }
