@@ -1,6 +1,8 @@
 package com.localcaption.app.ui.history
 
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,11 +16,15 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -48,8 +54,8 @@ import com.localcaption.app.ui.common.rememberAppContainer
 import kotlinx.coroutines.launch
 
 /**
- * Searchable list of recorded sessions. Tapping a row opens the detail screen, the
- * trailing button deletes a session after confirmation.
+ * Searchable list of recorded sessions with single delete and batch multi-select delete
+ * (entered via the top-right "批量管理" button or by long-pressing any session card).
  */
 @Composable
 fun HistoryListScreen(onOpenSession: (Long) -> Unit) {
@@ -60,7 +66,10 @@ fun HistoryListScreen(onOpenSession: (Long) -> Unit) {
         .collectAsStateWithLifecycle(initialValue = emptyList())
 
     var query by rememberSaveable { mutableStateOf("") }
+    var selectionMode by remember { mutableStateOf(false) }
+    var selectedIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
     var pendingDelete by remember { mutableStateOf<SessionEntity?>(null) }
+    var showBatchDeleteConfirm by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
 
     val filtered = remember(sessions, query) {
@@ -72,17 +81,89 @@ fun HistoryListScreen(onOpenSession: (Long) -> Unit) {
         }
     }
 
+    val filteredIds = remember(filtered) { filtered.map { it.id }.toSet() }
+    val allFilteredSelected = filtered.isNotEmpty() && filteredIds.all { it in selectedIds }
+
+    fun exitSelectionMode() {
+        selectionMode = false
+        selectedIds = emptySet()
+    }
+
+    fun toggleSelect(sessionId: Long) {
+        selectedIds = if (sessionId in selectedIds) {
+            selectedIds - sessionId
+        } else {
+            selectedIds + sessionId
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text(
-            text = "历史记录",
-            style = MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.SemiBold,
-        )
+        if (selectionMode) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                IconButton(onClick = { exitSelectionMode() }) {
+                    Icon(imageVector = Icons.Filled.Close, contentDescription = "取消选择")
+                }
+                Text(
+                    text = "已选 ${selectedIds.size} 项",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(
+                    onClick = {
+                        selectedIds = if (allFilteredSelected) {
+                            selectedIds - filteredIds
+                        } else {
+                            selectedIds + filteredIds
+                        }
+                    },
+                    enabled = filtered.isNotEmpty(),
+                ) {
+                    Text(if (allFilteredSelected) "取消全选" else "全选")
+                }
+                Button(
+                    onClick = { showBatchDeleteConfirm = true },
+                    enabled = selectedIds.isNotEmpty(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = MaterialTheme.colorScheme.onError,
+                    ),
+                ) {
+                    Text("删除")
+                }
+            }
+        } else {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "历史记录",
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f),
+                )
+                if (sessions.isNotEmpty()) {
+                    TextButton(
+                        onClick = {
+                            selectionMode = true
+                            selectedIds = emptySet()
+                        },
+                    ) {
+                        Text("批量管理")
+                    }
+                }
+            }
+        }
 
         OutlinedTextField(
             value = query,
@@ -116,7 +197,23 @@ fun HistoryListScreen(onOpenSession: (Long) -> Unit) {
                 items(items = filtered, key = { it.id }) { session ->
                     SessionRow(
                         session = session,
-                        onClick = { onOpenSession(session.id) },
+                        selectionMode = selectionMode,
+                        selected = session.id in selectedIds,
+                        onClick = {
+                            if (selectionMode) {
+                                toggleSelect(session.id)
+                            } else {
+                                onOpenSession(session.id)
+                            }
+                        },
+                        onLongClick = {
+                            if (!selectionMode) {
+                                selectionMode = true
+                                selectedIds = setOf(session.id)
+                            } else {
+                                toggleSelect(session.id)
+                            }
+                        },
                         onDelete = { pendingDelete = session },
                     )
                 }
@@ -129,7 +226,7 @@ fun HistoryListScreen(onOpenSession: (Long) -> Unit) {
             onDismissRequest = { pendingDelete = null },
             title = { Text("删除这条记录？") },
             text = {
-                Text("「${session.title}」及其全部字幕、说话人信息都会被删除，且无法恢复。")
+                Text("「${session.title}」及其全部字幕、说话人信息和录音文件都会被删除，且无法恢复。")
             },
             confirmButton = {
                 TextButton(
@@ -151,6 +248,45 @@ fun HistoryListScreen(onOpenSession: (Long) -> Unit) {
             },
             dismissButton = {
                 TextButton(onClick = { pendingDelete = null }) { Text("取消") }
+            },
+        )
+    }
+
+    if (showBatchDeleteConfirm && selectedIds.isNotEmpty()) {
+        val idsToDelete = selectedIds.toList()
+        AlertDialog(
+            onDismissRequest = { showBatchDeleteConfirm = false },
+            title = { Text("批量删除 ${idsToDelete.size} 条记录？") },
+            text = {
+                Text("选中的 ${idsToDelete.size} 条转录记录及其字幕、说话人信息和原始录音文件都会被彻底删除，且无法恢复。")
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showBatchDeleteConfirm = false
+                        exitSelectionMode()
+                        scope.launch {
+                            runCatching {
+                                idsToDelete.forEach { id ->
+                                    app.transcriptionRepository.deleteSession(id)
+                                }
+                            }.onSuccess {
+                                message = "已批量删除 ${idsToDelete.size} 条记录"
+                            }.onFailure {
+                                message = "批量删除失败：${it.message ?: "未知错误"}"
+                            }
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = MaterialTheme.colorScheme.onError,
+                    ),
+                ) {
+                    Text("确认删除")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showBatchDeleteConfirm = false }) { Text("取消") }
             },
         )
     }
@@ -183,10 +319,14 @@ private fun ColumnScope.EmptyHistory(text: String) {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun SessionRow(
     session: SessionEntity,
+    selectionMode: Boolean,
+    selected: Boolean,
     onClick: () -> Unit,
+    onLongClick: () -> Unit,
     onDelete: () -> Unit,
 ) {
     val durationMs = session.endedAt?.let { it - session.startedAt }
@@ -195,19 +335,41 @@ private fun SessionRow(
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick),
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onLongClick,
+            ),
         shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surface,
+        color = if (selected) {
+            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
+        } else {
+            MaterialTheme.colorScheme.surface
+        },
+        border = if (selected) {
+            BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary)
+        } else {
+            null
+        },
         tonalElevation = 2.dp,
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 14.dp, end = 4.dp, top = 10.dp, bottom = 12.dp),
+                .padding(start = 10.dp, end = 4.dp, top = 10.dp, bottom = 12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(modifier = Modifier.weight(1f)) {
+                if (selectionMode) {
+                    Checkbox(
+                        checked = selected,
+                        onCheckedChange = { onClick() },
+                    )
+                }
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(start = if (selectionMode) 2.dp else 4.dp),
+                ) {
                     Text(
                         text = session.title,
                         style = MaterialTheme.typography.titleMedium,
@@ -221,17 +383,22 @@ private fun SessionRow(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                IconButton(onClick = onDelete) {
-                    Icon(
-                        imageVector = Icons.Filled.Delete,
-                        contentDescription = "删除",
-                        tint = MaterialTheme.colorScheme.outline,
-                    )
+                if (!selectionMode) {
+                    IconButton(onClick = onDelete) {
+                        Icon(
+                            imageVector = Icons.Filled.Delete,
+                            contentDescription = "删除",
+                            tint = MaterialTheme.colorScheme.outline,
+                        )
+                    }
                 }
             }
 
             Row(
-                modifier = Modifier.padding(end = 10.dp),
+                modifier = Modifier.padding(
+                    start = if (selectionMode) 48.dp else 4.dp,
+                    end = 10.dp,
+                ),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
