@@ -1,8 +1,10 @@
 package com.localcaption.app.ui.history
 
 import android.content.Intent
+import android.media.MediaPlayer
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -10,6 +12,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -18,6 +21,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -27,6 +31,8 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.MergeType
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Subtitles
@@ -37,6 +43,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -49,12 +56,16 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -122,6 +133,124 @@ fun HistoryDetailScreen(
     val speakersMap = remember(speakers) { speakers.associate { it.id to it.label } }
     val audioFile = remember(session?.audioFilePath) {
         session?.audioFilePath?.takeIf { it.isNotBlank() }?.let { File(it) }?.takeIf { it.isFile }
+    }
+
+    // Audio playback state synced with transcript segments.
+    val listState = rememberLazyListState()
+    var mediaPlayer by remember { mutableStateOf<MediaPlayer?>(null) }
+    var isPlaying by remember { mutableStateOf(false) }
+    var playbackPosMs by remember { mutableLongStateOf(0L) }
+    var audioDurationMs by remember { mutableLongStateOf(0L) }
+    var playbackSpeed by remember { mutableFloatStateOf(1.0f) }
+
+    DisposableEffect(audioFile) {
+        val player = audioFile?.let { file ->
+            runCatching {
+                MediaPlayer().apply {
+                    setDataSource(file.absolutePath)
+                    prepare()
+                    setOnCompletionListener {
+                        isPlaying = false
+                        playbackPosMs = duration.toLong().coerceAtLeast(0L)
+                    }
+                }
+            }.getOrNull()
+        }
+        mediaPlayer = player
+        audioDurationMs = player?.duration?.toLong()?.coerceAtLeast(0L) ?: 0L
+        playbackPosMs = 0L
+        isPlaying = false
+        onDispose {
+            runCatching {
+                if (player?.isPlaying == true) player.stop()
+                player?.release()
+            }
+            if (mediaPlayer === player) {
+                mediaPlayer = null
+                isPlaying = false
+            }
+        }
+    }
+
+    LaunchedEffect(isPlaying, mediaPlayer) {
+        val player = mediaPlayer ?: return@LaunchedEffect
+        while (isPlaying) {
+            val pos = runCatching { player.currentPosition.toLong() }.getOrDefault(playbackPosMs)
+            playbackPosMs = pos.coerceAtLeast(0L)
+            if (!runCatching { player.isPlaying }.getOrDefault(false)) {
+                isPlaying = false
+                break
+            }
+            delay(100L)
+        }
+    }
+
+    val activeSegmentIndex = remember(segments, playbackPosMs, isPlaying) {
+        if (segments.isEmpty() || (!isPlaying && playbackPosMs == 0L)) {
+            -1
+        } else {
+            val exact = segments.indexOfFirst { playbackPosMs in it.startMs..it.endMs }
+            if (exact >= 0) {
+                exact
+            } else {
+                segments.indexOfLast { it.startMs <= playbackPosMs }
+            }
+        }
+    }
+    val activeSegmentId = segments.getOrNull(activeSegmentIndex)?.id
+
+    LaunchedEffect(activeSegmentIndex, isPlaying) {
+        if (isPlaying && activeSegmentIndex >= 0) {
+            listState.animateScrollToItem(index = activeSegmentIndex)
+        }
+    }
+
+    fun applySpeed(player: MediaPlayer, speed: Float) {
+        runCatching {
+            player.playbackParams = player.playbackParams.setSpeed(speed)
+        }
+    }
+
+    fun togglePlayback() {
+        val player = mediaPlayer ?: return
+        if (isPlaying) {
+            runCatching { player.pause() }
+            isPlaying = false
+        } else {
+            if (audioDurationMs > 0L && playbackPosMs >= audioDurationMs - 200L) {
+                runCatching { player.seekTo(0) }
+                playbackPosMs = 0L
+            }
+            runCatching {
+                player.start()
+                applySpeed(player, playbackSpeed)
+                isPlaying = true
+            }
+        }
+    }
+
+    fun seekTo(targetMs: Long, autoPlay: Boolean = false) {
+        val player = mediaPlayer ?: return
+        val clamped = targetMs.coerceIn(0L, audioDurationMs.coerceAtLeast(0L))
+        runCatching {
+            player.seekTo(clamped.toInt())
+            playbackPosMs = clamped
+            if (autoPlay && !isPlaying) {
+                player.start()
+                applySpeed(player, playbackSpeed)
+                isPlaying = true
+            }
+        }
+    }
+
+    fun cycleSpeed() {
+        val speeds = listOf(1.0f, 1.25f, 1.5f, 2.0f)
+        val next = speeds[(speeds.indexOf(playbackSpeed) + 1) % speeds.size]
+        playbackSpeed = next
+        val player = mediaPlayer
+        if (player != null && isPlaying) {
+            applySpeed(player, next)
+        }
     }
 
     fun srtContent(): String =
@@ -220,6 +349,7 @@ fun HistoryDetailScreen(
 
     Column(modifier = Modifier.fillMaxSize()) {
         TopAppBar(
+            windowInsets = WindowInsets(0, 0, 0, 0),
             title = {
                 Column {
                     Text(
@@ -409,6 +539,7 @@ fun HistoryDetailScreen(
             }
         } else {
             LazyColumn(
+                state = listState,
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f),
@@ -419,6 +550,9 @@ fun HistoryDetailScreen(
                     SegmentRow(
                         segment = segment,
                         speakerLabel = segment.speakerId?.let { speakersMap[it] },
+                        isActive = segment.id == activeSegmentId,
+                        canSeek = mediaPlayer != null,
+                        onSeek = { seekTo(segment.startMs, autoPlay = true) },
                         onEdit = {
                             editingSegment = segment
                             segmentTextDraft = segment.text
@@ -427,6 +561,19 @@ fun HistoryDetailScreen(
                     )
                 }
             }
+        }
+
+        if (mediaPlayer != null && audioDurationMs > 0L) {
+            HorizontalDivider()
+            AudioPlayerBar(
+                isPlaying = isPlaying,
+                positionMs = playbackPosMs,
+                durationMs = audioDurationMs,
+                speed = playbackSpeed,
+                onTogglePlay = { togglePlayback() },
+                onSeek = { seekTo(it, autoPlay = false) },
+                onCycleSpeed = { cycleSpeed() },
+            )
         }
     }
 
@@ -832,18 +979,101 @@ private fun RediarizeDialog(
 }
 
 @Composable
+private fun AudioPlayerBar(
+    isPlaying: Boolean,
+    positionMs: Long,
+    durationMs: Long,
+    speed: Float,
+    onTogglePlay: () -> Unit,
+    onSeek: (Long) -> Unit,
+    onCycleSpeed: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        tonalElevation = 2.dp,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                FilledIconButton(
+                    onClick = onTogglePlay,
+                    modifier = Modifier.size(40.dp),
+                ) {
+                    Icon(
+                        imageVector = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                        contentDescription = if (isPlaying) "暂停录音" else "播放录音",
+                    )
+                }
+                Column(modifier = Modifier.weight(1f)) {
+                    Slider(
+                        value = positionMs.coerceIn(0L, durationMs).toFloat(),
+                        onValueChange = { onSeek(it.toLong()) },
+                        valueRange = 0f..durationMs.coerceAtLeast(1L).toFloat(),
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Text(
+                            text = formatClock(positionMs),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Text(
+                            text = formatClock(durationMs),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                AssistChip(
+                    onClick = onCycleSpeed,
+                    label = {
+                        Text(
+                            text = String.format(Locale.US, "%.2gx", speed),
+                            style = MaterialTheme.typography.labelMedium,
+                        )
+                    },
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun SegmentRow(
     segment: SegmentEntity,
     speakerLabel: String?,
+    isActive: Boolean,
+    canSeek: Boolean,
+    onSeek: () -> Unit,
     onEdit: () -> Unit,
 ) {
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onEdit),
+            .clickable(onClick = if (canSeek) onSeek else onEdit),
         shape = RoundedCornerShape(14.dp),
-        color = MaterialTheme.colorScheme.surface,
-        tonalElevation = 1.dp,
+        color = if (isActive) {
+            MaterialTheme.colorScheme.primaryContainer
+        } else {
+            MaterialTheme.colorScheme.surface
+        },
+        border = if (isActive) {
+            BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary)
+        } else {
+            null
+        },
+        tonalElevation = if (isActive) 3.dp else 1.dp,
     ) {
         Row(
             modifier = Modifier
@@ -852,14 +1082,36 @@ private fun SegmentRow(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalAlignment = Alignment.Top,
         ) {
-            Text(
-                text = formatClock(segment.startMs),
+            Column(
                 modifier = Modifier
-                    .width(46.dp)
+                    .width(48.dp)
                     .padding(top = 2.dp),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+                horizontalAlignment = Alignment.Start,
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Text(
+                    text = formatClock(segment.startMs),
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal,
+                    color = if (isActive) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                )
+                if (canSeek) {
+                    Icon(
+                        imageVector = Icons.Filled.PlayArrow,
+                        contentDescription = "从此处播放",
+                        tint = if (isActive) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                        },
+                        modifier = Modifier.size(14.dp),
+                    )
+                }
+            }
             Column(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
@@ -871,6 +1123,12 @@ private fun SegmentRow(
                 Text(
                     text = segment.text,
                     style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = if (isActive) FontWeight.Medium else FontWeight.Normal,
+                    color = if (isActive) {
+                        MaterialTheme.colorScheme.onPrimaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.onSurface
+                    },
                 )
             }
             IconButton(
@@ -880,7 +1138,11 @@ private fun SegmentRow(
                 Icon(
                     imageVector = Icons.Filled.Edit,
                     contentDescription = "编辑字幕",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    tint = if (isActive) {
+                        MaterialTheme.colorScheme.onPrimaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
                     modifier = Modifier.size(18.dp),
                 )
             }
