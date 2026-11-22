@@ -75,6 +75,7 @@ object SherpaOnnxBridge {
             numThreads = numThreads,
             language = language,
             provider = normalizedProvider,
+            fellBackFromNnapi = false,
             debug = debug,
         )
         if (primary != null || normalizedProvider == "cpu") {
@@ -87,6 +88,7 @@ object SherpaOnnxBridge {
             numThreads = numThreads,
             language = language,
             provider = "cpu",
+            fellBackFromNnapi = true,
             debug = debug,
         )
     }
@@ -97,6 +99,7 @@ object SherpaOnnxBridge {
         numThreads: Int,
         language: String,
         provider: String,
+        fellBackFromNnapi: Boolean,
         debug: Boolean,
     ): SherpaOfflineRecognizer? {
         return runCatching {
@@ -219,14 +222,18 @@ object SherpaOnnxBridge {
             setProperty(recognizerConfig, listOf("modelConfig"), modelConfig)
             setProperty(recognizerConfig, listOf("decodingMethod"), "greedy_search")
 
-            createRecognizerWrapper(recognizerConfig)
+            createRecognizerWrapper(recognizerConfig, provider, fellBackFromNnapi)
         }.getOrElse { throwable ->
             Log.w(TAG, "Unable to create OfflineRecognizer for ${modelType.name}", throwable)
             null
         }
     }
 
-    private fun createRecognizerWrapper(config: Any): SherpaOfflineRecognizer? {
+    private fun createRecognizerWrapper(
+        config: Any,
+        activeProvider: String,
+        fellBackFromNnapi: Boolean,
+    ): SherpaOfflineRecognizer? {
         val recognizerClass = loadClass("OfflineRecognizer") ?: return null
         val streamClass = loadClass("OfflineStream") ?: return null
 
@@ -251,6 +258,8 @@ object SherpaOnnxBridge {
             acceptWaveformMethod = acceptWaveform,
             decodeMethod = decode,
             getResultMethod = getResult,
+            activeProvider = activeProvider,
+            fellBackFromNnapi = fellBackFromNnapi,
         )
     }
 
@@ -717,6 +726,8 @@ class SherpaOfflineRecognizer internal constructor(
     private val acceptWaveformMethod: Method,
     private val decodeMethod: Method,
     private val getResultMethod: Method,
+    val activeProvider: String = "cpu",
+    val fellBackFromNnapi: Boolean = false,
 ) : AutoCloseable {
 
     private val lock = Any()

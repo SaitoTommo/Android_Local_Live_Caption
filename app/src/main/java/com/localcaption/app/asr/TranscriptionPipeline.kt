@@ -33,6 +33,21 @@ enum class TranscriptionState {
     ERROR,
 }
 
+/** Runtime inference backend & latency snapshot for verifying CPU vs NNAPI execution. */
+data class InferenceTelemetry(
+    val activeProvider: String = "cpu",
+    val fellBackFromNnapi: Boolean = false,
+    val lastInferenceMs: Long = 0L,
+    val lastAudioMs: Long = 0L,
+) {
+    val lastRtf: Float
+        get() = if (lastAudioMs > 0L && lastInferenceMs > 0L) {
+            lastInferenceMs.toFloat() / lastAudioMs.toFloat()
+        } else {
+            0f
+        }
+}
+
 /**
  * A finalized caption emitted for the floating overlay / live view.
  *
@@ -110,6 +125,11 @@ class TranscriptionPipeline(
     /** Smoothed live input level in `[0f, 1f]` for waveform UI indicators. */
     val audioLevel: StateFlow<Float> = _audioLevel.asStateFlow()
 
+    private val _telemetry = MutableStateFlow(InferenceTelemetry())
+
+    /** Live execution provider (CPU / NNAPI) and per-segment latency telemetry. */
+    val telemetry: StateFlow<InferenceTelemetry> = _telemetry.asStateFlow()
+
     @Volatile
     private var lastLevelUpdateMs: Long = 0L
 
@@ -146,7 +166,16 @@ class TranscriptionPipeline(
         get() = sessionId
 
     /** Pre-loads the ASR engine before starting audio capture. */
-    suspend fun warmUp(): Boolean = asrEngine.warmUp()
+    suspend fun warmUp(): Boolean {
+        val ready = asrEngine.warmUp()
+        _telemetry.update {
+            it.copy(
+                activeProvider = asrEngine.activeProvider,
+                fellBackFromNnapi = asrEngine.fellBackFromNnapi,
+            )
+        }
+        return ready
+    }
 
     /**
      * Starts capturing audio and transcribing it into [sessionId].
@@ -309,6 +338,12 @@ class TranscriptionPipeline(
             AsrResult(text = "")
         }
         val text = result.text.trim()
+        _telemetry.value = InferenceTelemetry(
+            activeProvider = asrEngine.activeProvider,
+            fellBackFromNnapi = asrEngine.fellBackFromNnapi,
+            lastInferenceMs = result.durationMs,
+            lastAudioMs = segment.durationMs,
+        )
         if (text.isEmpty()) return
 
         val speakerId = speaker?.let { identity ->
@@ -366,6 +401,7 @@ class TranscriptionPipeline(
                 numThreads = settings.numThreads,
                 defaultLanguage = settings.language,
                 provider = settings.executionProvider,
+                debug = settings.executionProvider == AppSettings.PROVIDER_NNAPI,
             )
 
             val vadHandle = modelManager.sileroVadFile()?.let { modelFile ->

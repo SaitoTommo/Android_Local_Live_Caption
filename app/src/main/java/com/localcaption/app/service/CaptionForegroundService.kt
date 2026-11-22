@@ -24,6 +24,7 @@ import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import com.localcaption.app.LocalCaptionApp
 import com.localcaption.app.R
+import com.localcaption.app.asr.InferenceTelemetry
 import com.localcaption.app.asr.LiveCaption
 import com.localcaption.app.asr.TranscriptionPipeline
 import com.localcaption.app.asr.TranscriptionState
@@ -82,6 +83,7 @@ data class CaptionServiceState(
     val audioSource: AudioSourceType? = null,
     val activeSessionId: Long = 0L,
     val audioLevel: Float = 0f,
+    val telemetry: InferenceTelemetry = InferenceTelemetry(),
     val recentCaptions: List<LiveCaption> = emptyList(),
     val statusMessage: String = "",
     val lastError: String? = null,
@@ -564,6 +566,13 @@ class CaptionForegroundService : Service() {
             pipeline.lastError.collect { error ->
                 if (error != null) {
                     publishState { copy(lastError = error, statusMessage = error) }
+                }
+            }
+        }
+        sessionJobs += serviceScope.launch {
+            pipeline.telemetry.collect { latest ->
+                if (isSessionActive()) {
+                    publishState { copy(telemetry = latest) }
                 }
             }
         }

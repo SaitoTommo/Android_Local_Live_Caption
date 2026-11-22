@@ -37,6 +37,14 @@ interface AsrEngine : AutoCloseable {
     /** `true` when the native recognizer could be initialized. */
     val isReady: Boolean
 
+    /** Actual execution provider active in the engine (`"nnapi"` or `"cpu"`). */
+    val activeProvider: String
+        get() = "cpu"
+
+    /** `true` when NNAPI was requested but failed to initialize and fell back to CPU. */
+    val fellBackFromNnapi: Boolean
+        get() = false
+
     /** Pre-loads the native recognizer into memory so the first segment does not stall. */
     suspend fun warmUp(): Boolean = isReady
 
@@ -89,6 +97,12 @@ class SherpaAsrEngine(
 
     override val isReady: Boolean
         get() = ensureRecognizer() != null
+
+    override val activeProvider: String
+        get() = recognizer?.activeProvider ?: provider
+
+    override val fellBackFromNnapi: Boolean
+        get() = recognizer?.fellBackFromNnapi ?: false
 
     override suspend fun warmUp(): Boolean = withContext(Dispatchers.Default) {
         ensureRecognizer() != null

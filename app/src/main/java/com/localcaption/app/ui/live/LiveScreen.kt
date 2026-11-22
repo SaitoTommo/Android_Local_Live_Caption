@@ -73,6 +73,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.localcaption.app.R
+import com.localcaption.app.asr.InferenceTelemetry
 import com.localcaption.app.asr.LiveCaption
 import com.localcaption.app.asr.SherpaOnnxBridge
 import com.localcaption.app.data.model.AudioSourceType
@@ -272,6 +273,8 @@ fun LiveScreen(
             isStopping = isStopping,
             isPaused = serviceState.isPaused,
             audioLevel = serviceState.audioLevel,
+            telemetry = serviceState.telemetry,
+            requestedProvider = settings.executionProvider,
             modelName = settings.asrModel.displayName,
             modelInstalled = modelInstalled,
             nativeAvailable = nativeAvailable,
@@ -417,6 +420,8 @@ private fun StatusBanner(
     isStopping: Boolean,
     isPaused: Boolean,
     audioLevel: Float,
+    telemetry: InferenceTelemetry,
+    requestedProvider: String,
     modelName: String,
     modelInstalled: Boolean,
     nativeAvailable: Boolean,
@@ -489,6 +494,40 @@ private fun StatusBanner(
 
             if (isRunning && !isPaused && !isInitializing && !isStopping) {
                 AudioWaveformMeter(level = audioLevel)
+            }
+
+            if (isActive && !isInitializing) {
+                val providerLabel = when {
+                    telemetry.activeProvider == AppSettings.PROVIDER_NNAPI -> "推理后端: NNAPI (已启用)"
+                    telemetry.fellBackFromNnapi -> "推理后端: CPU (NNAPI 不支持已回退)"
+                    else -> "推理后端: CPU"
+                }
+                val perfSuffix = if (telemetry.lastInferenceMs > 0L) {
+                    val rtfText = if (telemetry.lastRtf > 0f) {
+                        String.format(java.util.Locale.US, " · RTF %.2fx", telemetry.lastRtf)
+                    } else {
+                        ""
+                    }
+                    " · 最近推理 ${telemetry.lastInferenceMs} ms$rtfText"
+                } else {
+                    ""
+                }
+                val isNnapiActive = telemetry.activeProvider == AppSettings.PROVIDER_NNAPI
+                Text(
+                    text = providerLabel + perfSuffix,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = when {
+                        isNnapiActive -> Color(0xFF2FBF8F)
+                        telemetry.fellBackFromNnapi -> MaterialTheme.colorScheme.error
+                        else -> MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                )
+            } else if (!isActive && requestedProvider == AppSettings.PROVIDER_NNAPI) {
+                Text(
+                    text = "已选推理后端: NNAPI（开始识别后将显示是否成功启用及实时耗时）",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
