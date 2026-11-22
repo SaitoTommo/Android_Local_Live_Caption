@@ -26,10 +26,10 @@ object OfflineSessionRediarizer {
 
     private const val TAG = "OfflineRediarizer"
     private const val SAMPLE_RATE = AudioCaptureSource.SAMPLE_RATE
-    private const val WINDOW_SAMPLES = (SAMPLE_RATE * 1.6f).toInt()
-    private const val HOP_SAMPLES = (SAMPLE_RATE * 0.8f).toInt()
+    private const val WINDOW_SAMPLES = (SAMPLE_RATE * 2.4f).toInt()
+    private const val HOP_SAMPLES = (SAMPLE_RATE * 1.2f).toInt()
     private const val MIN_WINDOW_SAMPLES = (SAMPLE_RATE * 0.6f).toInt()
-    private const val CONTEXT_PAD_SAMPLES = (SAMPLE_RATE * 0.35f).toInt()
+    private const val CONTEXT_PAD_SAMPLES = (SAMPLE_RATE * 0.25f).toInt()
 
     data class RediarizeResult(
         val segmentToSpeakerLabel: Map<Long, String>,
@@ -101,8 +101,9 @@ object OfflineSessionRediarizer {
                 error("有效语音时长不足，无法提取说话人声纹")
             }
 
-            // Session-level mean centering + L2 normalization strips shared channel/noise bias.
-            centerAndNormalize(windows)
+            // Pure L2 normalization (do NOT subtract session mean: on 1-speaker recordings
+            // subtracting the session mean removes the speaker's own voice vector!).
+            normalizeAll(windows)
 
             val assignments = clusterAgglomerative(
                 embeddings = windows.map { it.embedding },
@@ -162,8 +163,9 @@ object OfflineSessionRediarizer {
     }
 
     /**
-     * Removes DC offset, applies 1st-order pre-emphasis (suppresses low-frequency noise),
-     * and globally normalizes RMS loudness across the full session recording.
+     * Removes DC offset and gently normalizes global RMS loudness across the full session
+     * recording. Does NOT apply extra pre-emphasis because 3D-Speaker's internal Kaldi
+     * Fbank extractor already applies pre-emphasis + CMVN.
      */
     internal fun preprocessAudio(samples: FloatArray): FloatArray {
         if (samples.isEmpty()) return samples
@@ -172,20 +174,16 @@ object OfflineSessionRediarizer {
         mean /= samples.size
 
         val out = FloatArray(samples.size)
-        var prev = (samples[0] - mean).toFloat()
-        out[0] = prev
-        var sumSq = (prev * prev).toDouble()
-        for (i in 1 until samples.size) {
+        var sumSq = 0.0
+        for (i in samples.indices) {
             val centered = (samples[i] - mean).toFloat()
-            val emphasized = centered - 0.95f * prev
-            prev = centered
-            out[i] = emphasized
-            sumSq += (emphasized * emphasized).toDouble()
+            out[i] = centered
+            sumSq += (centered * centered).toDouble()
         }
 
         val rms = sqrt(sumSq / samples.size).toFloat()
         if (rms > 1e-4f) {
-            val gain = (0.08f / rms).coerceIn(0.25f, 8f)
+            val gain = (0.08f / rms).coerceIn(0.25f, 6f)
             for (i in out.indices) {
                 out[i] = (out[i] * gain).coerceIn(-1f, 1f)
             }
@@ -228,54 +226,35 @@ object OfflineSessionRediarizer {
         return merged
     }
 
-    private fun centerAndNormalize(windows: List<WindowEmbedding>) {
-        if (windows.isEmpty()) return
-        val dim = windows[0].embedding.size
-        // First L2-normalize each raw embedding.
+    private fun normalizeAll(windows: List<WindowEmbedding>) {
         for (w in windows) {
             l2NormalizeInPlace(w.embedding)
-        }
-        // Only apply session mean-centering when we have enough windows (>= 4) so
-        // 2-window recordings don't collapse opposite vectors artificially.
-        if (windows.size >= 4) {
-            val mean = FloatArray(dim)
-            for (w in windows) {
-                val emb = w.embedding
-                for (d in 0 until dim) mean[d] += emb[d]
-            }
-            val invN = 1f / windows.size
-            for (d in 0 until dim) mean[d] *= invN
-
-            for (w in windows) {
-                val emb = w.embedding
-                for (d in 0 until dim) emb[d] -= mean[d] * 0.65f
-                l2NormalizeInPlace(emb)
-            }
         }
     }
 
     /**
-     * Global Agglomerative Hierarchical Clustering (average linkage) on L2-normalized vectors.
-     * Pure Kotlin so it is fast, deterministic, and unit-testable.
+     * Global Agglomerative Hierarchical Clustering (centroid cosine linkage) on L2-normalized
+     * vectors. Pure Kotlin so it is fast, deterministic, and unit-testable.
      */
     internal fun clusterAgglomerative(
         embeddings: List<FloatArray>,
         expectedSpeakers: Int? = null,
-        similarityThreshold: Float = 0.50f,
+        similarityThreshold: Float = 0.45f,
     ): IntArray {
         val n = embeddings.size
         if (n == 0) return IntArray(0)
         if (n == 1) return IntArray(1) { 0 }
 
         val targetK = expectedSpeakers?.coerceIn(1, n)
-        // Pairwise cosine similarity matrix (vectors are already L2-normalized).
-        val sim = Array(n) { i ->
-            FloatArray(n) { j ->
-                if (i == j) 1f else dot(embeddings[i], embeddings[j])
-            }
-        }
+        val dim = embeddings[0].size
 
-        val clusters = MutableList(n) { idx -> mutableListOf(idx) }
+        class Cluster(val members: MutableList<Int>, val sumVec: FloatArray, val centroid: FloatArray)
+
+        val clusters = MutableList(n) { idx ->
+            val v = embeddings[idx].copyOf()
+            l2NormalizeInPlace(v)
+            Cluster(mutableListOf(idx), v.copyOf(), v)
+        }
 
         while (clusters.size > 1) {
             if (targetK != null && clusters.size <= targetK) break
@@ -286,9 +265,9 @@ object OfflineSessionRediarizer {
 
             for (a in 0 until clusters.size) {
                 for (b in a + 1 until clusters.size) {
-                    val avg = averageLinkageSim(clusters[a], clusters[b], sim)
-                    if (avg > bestSim) {
-                        bestSim = avg
+                    val sim = dot(clusters[a].centroid, clusters[b].centroid)
+                    if (sim > bestSim) {
+                        bestSim = sim
                         bestA = a
                         bestB = b
                     }
@@ -298,31 +277,24 @@ object OfflineSessionRediarizer {
             if (bestA < 0 || bestB < 0) break
             if (targetK == null && bestSim < similarityThreshold) break
 
-            clusters[bestA].addAll(clusters[bestB])
+            val target = clusters[bestA]
+            val merged = clusters[bestB]
+            target.members.addAll(merged.members)
+            for (d in 0 until dim) {
+                target.sumVec[d] += merged.sumVec[d]
+                target.centroid[d] = target.sumVec[d]
+            }
+            l2NormalizeInPlace(target.centroid)
             clusters.removeAt(bestB)
         }
 
         val result = IntArray(n)
-        clusters.forEachIndexed { clusterIdx, members ->
-            for (m in members) {
+        clusters.forEachIndexed { clusterIdx, cluster ->
+            for (m in cluster.members) {
                 result[m] = clusterIdx
             }
         }
         return result
-    }
-
-    private fun averageLinkageSim(
-        clusterA: List<Int>,
-        clusterB: List<Int>,
-        sim: Array<FloatArray>,
-    ): Float {
-        var sum = 0f
-        for (i in clusterA) {
-            for (j in clusterB) {
-                sum += sim[i][j]
-            }
-        }
-        return sum / (clusterA.size * clusterB.size)
     }
 
     private fun dot(a: FloatArray, b: FloatArray): Float {

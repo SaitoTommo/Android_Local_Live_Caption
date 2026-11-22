@@ -53,6 +53,23 @@ class OfflineSessionRediarizerTest {
     }
 
     @Test
+    fun `single speaker across 16 noisy windows merges cleanly into 1 speaker`() {
+        val embeddings = List(16) { idx ->
+            normalized(
+                0.90f,
+                (idx % 5 - 2) * 0.08f,
+                ((idx * 3) % 5 - 2) * 0.07f,
+            )
+        }
+        val clusters = OfflineSessionRediarizer.clusterAgglomerative(
+            embeddings = embeddings,
+            expectedSpeakers = null,
+            similarityThreshold = 0.45f,
+        )
+        assertEquals(1, clusters.toSet().size)
+    }
+
+    @Test
     fun `preprocessAudio removes DC offset and normalizes RMS`() {
         val samples = FloatArray(1600) { i -> 0.5f + if (i % 2 == 0) 0.01f else -0.01f }
         val processed = OfflineSessionRediarizer.preprocessAudio(samples)

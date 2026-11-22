@@ -578,7 +578,7 @@ fun HistoryDetailScreen(
 
     if (showRediarizeDialog && audioFile != null) {
         RediarizeDialog(
-            initialThreshold = settings.diarizationThreshold.coerceIn(0.30f, 0.80f),
+            initialThreshold = (settings.diarizationThreshold - 0.10f).coerceIn(0.30f, 0.70f),
             onConfirm = { expectedCount, threshold ->
                 showRediarizeDialog = false
                 rediarizing = true
