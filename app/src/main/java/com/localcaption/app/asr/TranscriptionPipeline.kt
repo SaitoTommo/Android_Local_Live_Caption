@@ -2,9 +2,11 @@ package com.localcaption.app.asr
 
 import android.util.Log
 import com.localcaption.app.audio.AudioCaptureSource
+import com.localcaption.app.audio.SessionWavRecorder
 import com.localcaption.app.data.model.AudioSourceType
 import com.localcaption.app.data.prefs.AppSettings
 import com.localcaption.app.data.repository.TranscriptionRepository
+import java.io.File
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -76,6 +78,7 @@ class TranscriptionPipeline(
     private val speakerDiarizer: SpeakerDiarizer? = null,
     private val audioSourceType: AudioSourceType,
     private val sampleRate: Int = AudioCaptureSource.SAMPLE_RATE,
+    private val wavOutputFile: File? = null,
     parentScope: CoroutineScope? = null,
     private val maxRecentCaptions: Int = DEFAULT_RECENT_CAPTIONS,
 ) : AutoCloseable {
@@ -126,6 +129,9 @@ class TranscriptionPipeline(
     private var audioChannel: Channel<FloatArray>? = null
 
     @Volatile
+    private var wavRecorder: SessionWavRecorder? = null
+
+    @Volatile
     private var worker: Job? = null
 
     @Volatile
@@ -172,13 +178,23 @@ class TranscriptionPipeline(
             )
             audioChannel = channel
 
+            val recorder = wavOutputFile?.let { file ->
+                runCatching { SessionWavRecorder(file, sampleRate) }
+                    .onFailure { Log.w(TAG, "Unable to open session WAV recorder at $file", it) }
+                    .getOrNull()
+            }
+            wavRecorder = recorder
+
             val started = audioCaptureSource.start { samples ->
                 updateAudioLevel(samples)
+                recorder?.append(samples)
                 channel.trySend(samples)
             }
             if (!started) {
                 audioChannel = null
                 channel.close()
+                runCatching { recorder?.close() }
+                wavRecorder = null
                 _audioLevel.value = 0f
                 _lastError.value = "无法启动音频采集，请检查权限或录屏授权"
                 _state.value = TranscriptionState.ERROR
@@ -205,6 +221,8 @@ class TranscriptionPipeline(
         audioCaptureSource.stop()
         _audioLevel.value = 0f
         channelToClose?.close()
+        runCatching { wavRecorder?.close() }
+        wavRecorder = null
     }
 
     private fun updateAudioLevel(samples: FloatArray) {
@@ -339,6 +357,7 @@ class TranscriptionPipeline(
             settings: AppSettings,
             audioCaptureSource: AudioCaptureSource,
             modelManager: ModelManager,
+            wavOutputFile: File? = null,
             parentScope: CoroutineScope? = null,
         ): TranscriptionPipeline {
             val asrEngine = SherpaAsrEngine(
@@ -355,6 +374,7 @@ class TranscriptionPipeline(
                     sampleRate = AudioCaptureSource.SAMPLE_RATE,
                     silenceMs = settings.vadSilenceMs,
                     maxSpeechMs = settings.maxSegmentDurationMs,
+                    threshold = 0.38f,
                     numThreads = 1,
                 )
             }
@@ -388,6 +408,7 @@ class TranscriptionPipeline(
                 asrEngine = asrEngine,
                 speakerDiarizer = speakerDiarizer,
                 audioSourceType = settings.audioSource,
+                wavOutputFile = wavOutputFile,
                 parentScope = parentScope,
             )
         }

@@ -1,17 +1,19 @@
 package com.localcaption.app.data.repository
 
+import androidx.room.withTransaction
 import com.localcaption.app.data.db.AppDatabase
 import com.localcaption.app.data.db.SegmentEntity
 import com.localcaption.app.data.db.SessionEntity
 import com.localcaption.app.data.db.SpeakerEntity
 import com.localcaption.app.data.model.AsrModelType
 import com.localcaption.app.data.model.AudioSourceType
+import java.io.File
 import kotlinx.coroutines.flow.Flow
 
 /**
  * Single entry point for persisting transcription sessions, segments and speakers.
  */
-class TranscriptionRepository(database: AppDatabase) {
+class TranscriptionRepository(private val database: AppDatabase) {
 
     private val sessionDao = database.sessionDao()
     private val segmentDao = database.segmentDao()
@@ -54,9 +56,17 @@ class TranscriptionRepository(database: AppDatabase) {
         sessionDao.rename(sessionId, title)
     }
 
+    suspend fun updateSessionAudioPath(sessionId: Long, audioFilePath: String?) {
+        sessionDao.updateAudioFilePath(sessionId, audioFilePath)
+    }
+
     suspend fun deleteSession(sessionId: Long) {
+        val audioPath = sessionDao.getById(sessionId)?.audioFilePath
         // Segments and speakers are removed by ON DELETE CASCADE.
         sessionDao.deleteById(sessionId)
+        if (!audioPath.isNullOrBlank()) {
+            runCatching { File(audioPath).delete() }
+        }
     }
 
     // endregion
@@ -139,6 +149,43 @@ class TranscriptionRepository(database: AppDatabase) {
 
     suspend fun deleteSpeaker(speakerId: Long) {
         speakerDao.deleteById(speakerId)
+    }
+
+    /**
+     * Merges [sourceSpeakerId] into [targetSpeakerId] within [sessionId]: all segments
+     * belonging to the source speaker are reassigned and the source speaker row is deleted.
+     */
+    suspend fun mergeSpeakers(
+        sessionId: Long,
+        sourceSpeakerId: Long,
+        targetSpeakerId: Long,
+    ) {
+        if (sourceSpeakerId == targetSpeakerId) return
+        database.withTransaction {
+            segmentDao.reassignSpeaker(sessionId, sourceSpeakerId, targetSpeakerId)
+            speakerDao.deleteById(sourceSpeakerId)
+        }
+    }
+
+    /**
+     * Atomically replaces all speaker assignments for [sessionId] after whole-session
+     * offline re-diarization.
+     */
+    suspend fun replaceSessionSpeakers(
+        sessionId: Long,
+        segmentSpeakerLabels: Map<Long, String>,
+    ) {
+        database.withTransaction {
+            segmentDao.clearSpeakersBySession(sessionId)
+            speakerDao.deleteBySession(sessionId)
+            val labelToId = mutableMapOf<String, Long>()
+            for ((segmentId, label) in segmentSpeakerLabels) {
+                val speakerId = labelToId.getOrPut(label) {
+                    getOrCreateSpeaker(sessionId, label)
+                }
+                segmentDao.assignSpeaker(segmentId, speakerId)
+            }
+        }
     }
 
     // endregion

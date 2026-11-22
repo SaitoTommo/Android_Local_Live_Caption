@@ -37,4 +37,13 @@ interface SegmentDao {
 
     @Query("UPDATE segments SET speakerId = :speakerId WHERE id = :segmentId")
     suspend fun assignSpeaker(segmentId: Long, speakerId: Long?)
+
+    @Query(
+        "UPDATE segments SET speakerId = :toSpeakerId " +
+            "WHERE sessionId = :sessionId AND speakerId = :fromSpeakerId",
+    )
+    suspend fun reassignSpeaker(sessionId: Long, fromSpeakerId: Long, toSpeakerId: Long)
+
+    @Query("UPDATE segments SET speakerId = NULL WHERE sessionId = :sessionId")
+    suspend fun clearSpeakersBySession(sessionId: Long)
 }

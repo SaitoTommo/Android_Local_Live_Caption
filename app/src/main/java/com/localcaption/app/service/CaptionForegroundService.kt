@@ -30,6 +30,7 @@ import com.localcaption.app.asr.TranscriptionState
 import com.localcaption.app.audio.AudioCaptureSource
 import com.localcaption.app.audio.MicAudioCapture
 import com.localcaption.app.audio.PlaybackAudioCapture
+import com.localcaption.app.audio.SessionWavRecorder
 import com.localcaption.app.data.model.AudioSourceType
 import com.localcaption.app.data.prefs.AppSettings
 import java.text.SimpleDateFormat
@@ -311,6 +312,12 @@ class CaptionForegroundService : Service() {
 
                 if (stopRequested) return@launch
 
+                val wavFile = SessionWavRecorder.fileForSession(
+                    this@CaptionForegroundService,
+                    sessionId,
+                )
+                app.transcriptionRepository.updateSessionAudioPath(sessionId, wavFile.absolutePath)
+
                 val pipelineSettings = currentSettings.copy(audioSource = source)
                 val created = withContext(Dispatchers.Default) {
                     // Builds AudioCaptureSource -> VadSegmenter -> SherpaAsrEngine
@@ -320,6 +327,7 @@ class CaptionForegroundService : Service() {
                         settings = pipelineSettings,
                         audioCaptureSource = capture,
                         modelManager = app.modelManager,
+                        wavOutputFile = wavFile,
                         parentScope = pipelineScope,
                     )
                 }

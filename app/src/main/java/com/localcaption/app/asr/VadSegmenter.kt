@@ -46,10 +46,13 @@ class SpeechSegment(
 /**
  * Splits a continuous 16 kHz audio stream into [SpeechSegment]s.
  *
- * Silero VAD (through [SherpaOnnxBridge], i.e. [SherpaVadHandle]) is used when the
- * model is installed; otherwise a small energy/RMS VAD keeps the pipeline functional
- * on a fresh install. Both paths honour [vadSilenceMs] (trailing silence that closes
- * a segment) and [maxSegmentDurationMs] (hard segment limit).
+ * Improvements for natural phrasing & consonant preservation:
+ * - Maintains a rolling pre-roll audio ring buffer ([preRollMs], default 350 ms) and
+ *   prepends it before speech onset on BOTH Silero VAD and energy-VAD paths so soft
+ *   unvoiced leading consonants (`p/t/k/s/sh/f/th/ch`) are never clipped.
+ * - When a continuous utterance reaches [maxSegmentDurationMs], searches the trailing
+ *   window for a natural acoustic energy valley (breath / micro-pause) instead of slicing
+ *   blindly mid-syllable, preserving natural word boundaries.
  */
 class VadSegmenter(
     private val sampleRate: Int = AudioCaptureSource.SAMPLE_RATE,
@@ -57,6 +60,7 @@ class VadSegmenter(
     private val maxSegmentDurationMs: Int = 10_000,
     private val minSpeechDurationMs: Int = 250,
     private val energyThreshold: Float = 0.012f,
+    private val preRollMs: Int = DEFAULT_PRE_ROLL_MS,
     private val vadHandle: SherpaVadHandle? = null,
 ) : AutoCloseable {
 
@@ -70,17 +74,23 @@ class VadSegmenter(
             .toInt()
             .coerceAtLeast(1)
 
-    /** Amount of trailing silence kept after a segment ends (100 ms). */
-    private val tailKeepSamples: Int = sampleRate / 10
+    private val preRollSamples: Int =
+        ((sampleRate.toLong() * preRollMs) / 1000L).toInt().coerceAtLeast(0)
+
+    /** Amount of trailing silence kept after a segment ends (120 ms). */
+    private val tailKeepSamples: Int = (sampleRate * 12) / 100
 
     private val frameSize: Int = max(sampleRate / 50, 80) // 20 ms
     private val frame = FloatArray(frameSize)
     private var frameFill = 0
 
     private val pending = FloatSampleBuffer(max(sampleRate, min(maxSamplesPerSegment, sampleRate * 2)))
+    private val recentAudio = RecentAudioRingBuffer(sampleRate * 15)
+
     private var segmentStartSample = -1L
     private var silenceSamples = 0
     private var processedSamples = 0L
+    private var lastEmittedEndSample = 0L
 
     private var sileroProcessedSamples = 0L
     private var sileroFailureLogged = false
@@ -95,6 +105,7 @@ class VadSegmenter(
      */
     fun process(samples: FloatArray): List<SpeechSegment> {
         if (samples.isEmpty()) return emptyList()
+        recentAudio.append(samples)
         val handle = vadHandle
         return if (handle != null) {
             processSilero(handle, samples)
@@ -111,8 +122,8 @@ class VadSegmenter(
         val out = mutableListOf<SpeechSegment>()
         val handle = vadHandle
         if (handle != null) {
-            // A one second silence tail makes Silero VAD close an in-flight segment.
             val tail = FloatArray(sampleRate)
+            recentAudio.append(tail)
             runCatching { handle.accept(tail) }
                 .onFailure { logSileroFailure(it) }
             sileroProcessedSamples += tail.size
@@ -135,9 +146,11 @@ class VadSegmenter(
     fun reset() {
         frameFill = 0
         pending.clear()
+        recentAudio.clear()
         segmentStartSample = -1L
         silenceSamples = 0
         processedSamples = 0L
+        lastEmittedEndSample = 0L
         sileroProcessedSamples = 0L
         sileroFailureLogged = false
         runCatching { vadHandle?.reset() }
@@ -179,22 +192,50 @@ class VadSegmenter(
         endSample: Long,
     ) {
         if (samples.isEmpty()) return
-        var offset = 0
-        while (offset < samples.size) {
-            val length = min(maxSamplesPerSegment, samples.size - offset)
-            val piece = if (offset == 0 && length == samples.size) {
-                samples
-            } else {
-                samples.copyOfRange(offset, offset + length)
+
+        // Prepend up to preRollSamples from the rolling raw audio buffer right before the
+        // VAD trigger so soft leading consonants (p/t/k/s/sh/f/th) are preserved intact.
+        val rawStartSample = (endSample - samples.size).coerceAtLeast(0L)
+        val desiredPreStart = (rawStartSample - preRollSamples).coerceAtLeast(lastEmittedEndSample)
+        val preRoll = if (preRollSamples > 0 && rawStartSample > desiredPreStart) {
+            recentAudio.copyRange(desiredPreStart, rawStartSample)
+        } else {
+            null
+        }
+
+        val combined = if (preRoll != null && preRoll.isNotEmpty()) {
+            FloatArray(preRoll.size + samples.size).also { merged ->
+                System.arraycopy(preRoll, 0, merged, 0, preRoll.size)
+                System.arraycopy(samples, 0, merged, preRoll.size, samples.size)
             }
-            val pieceEnd = endSample - (samples.size - (offset + length))
-            val pieceStart = (pieceEnd - length).coerceAtLeast(0L)
+        } else {
+            samples
+        }
+        val combinedStartSample = (endSample - combined.size).coerceAtLeast(0L)
+
+        var offset = 0
+        while (offset < combined.size) {
+            val remaining = combined.size - offset
+            val splitLength = if (remaining <= maxSamplesPerSegment) {
+                remaining
+            } else {
+                findNaturalSplitLength(combined, offset, maxSamplesPerSegment)
+            }
+
+            val piece = if (offset == 0 && splitLength == combined.size) {
+                combined
+            } else {
+                combined.copyOfRange(offset, offset + splitLength)
+            }
+            val pieceStart = combinedStartSample + offset
+            val pieceEnd = pieceStart + splitLength
             val startMs = pieceStart * 1000L / sampleRate
             val endMs = pieceEnd * 1000L / sampleRate
             if (endMs - startMs >= minSpeechDurationMs) {
                 out += SpeechSegment(piece, startMs, endMs)
+                lastEmittedEndSample = max(lastEmittedEndSample, pieceEnd)
             }
-            offset += length
+            offset += splitLength
         }
     }
 
@@ -235,9 +276,22 @@ class VadSegmenter(
 
         if (segmentStartSample < 0L) {
             if (voiced) {
-                segmentStartSample = frameStartSample
-                silenceSamples = 0
                 pending.clear()
+                // Prepend available pre-roll audio (without overlapping the previous segment)
+                // so soft leading consonants before the energy threshold trigger are kept.
+                val preStart = (frameStartSample - preRollSamples).coerceAtLeast(lastEmittedEndSample)
+                val preRoll = if (preRollSamples > 0 && frameStartSample > preStart) {
+                    recentAudio.copyRange(preStart, frameStartSample)
+                } else {
+                    null
+                }
+                if (preRoll != null && preRoll.isNotEmpty()) {
+                    pending.add(preRoll)
+                    segmentStartSample = frameStartSample - preRoll.size
+                } else {
+                    segmentStartSample = frameStartSample
+                }
+                silenceSamples = 0
                 pending.add(frame)
             }
         } else {
@@ -252,14 +306,32 @@ class VadSegmenter(
             val reachedMaxDuration = durationSamples >= maxSamplesPerSegment
             val reachedSilence = silenceSamples >= silenceSamplesThreshold
 
-            if (reachedSilence || reachedMaxDuration) {
+            if (reachedSilence) {
                 val endSample = processedSamples + frameSize
-                val trim = if (reachedSilence) {
-                    max(silenceSamples - tailKeepSamples, 0)
-                } else {
-                    0
-                }
+                val trim = max(silenceSamples - tailKeepSamples, 0)
                 emitSegment(out, segmentStartSample, endSample, trim)
+            } else if (reachedMaxDuration) {
+                val all = pending.toFloatArray()
+                val splitLength = findNaturalSplitLength(all, 0, all.size)
+                val actualEndSample = segmentStartSample + splitLength
+                val durationMs = (actualEndSample - segmentStartSample) * 1000L / sampleRate
+                if (splitLength > 0 && durationMs >= minSpeechDurationMs) {
+                    out += SpeechSegment(
+                        samples = all.copyOfRange(0, splitLength),
+                        startMs = segmentStartSample * 1000L / sampleRate,
+                        endMs = actualEndSample * 1000L / sampleRate,
+                    )
+                    lastEmittedEndSample = max(lastEmittedEndSample, actualEndSample)
+                }
+                pending.clear()
+                val leftover = all.size - splitLength
+                if (leftover > 0) {
+                    pending.add(all, splitLength, all.size)
+                    segmentStartSample = actualEndSample
+                } else {
+                    segmentStartSample = -1L
+                }
+                silenceSamples = 0
             }
         }
 
@@ -282,6 +354,7 @@ class VadSegmenter(
                 startMs = startSample * 1000L / sampleRate,
                 endMs = actualEndSample * 1000L / sampleRate,
             )
+            lastEmittedEndSample = max(lastEmittedEndSample, actualEndSample)
         }
 
         pending.clear()
@@ -289,11 +362,107 @@ class VadSegmenter(
         silenceSamples = 0
     }
 
+    /**
+     * Looks inside the trailing 1.2 s of `[offset, offset + maxLen]` for a natural
+     * acoustic energy valley (breath or inter-word pause). If a clear valley exists
+     * (RMS < 65% of local average), splits there instead of chopping mid-word.
+     */
+    private fun findNaturalSplitLength(
+        samples: FloatArray,
+        offset: Int,
+        maxLen: Int,
+    ): Int {
+        val searchWindow = min((sampleRate * 12) / 10, maxLen / 3)
+        val winStep = max(sampleRate / 50, 160) // 20 ms
+        if (searchWindow < winStep * 3) return maxLen
+
+        val searchStart = offset + maxLen - searchWindow
+        val searchEnd = offset + maxLen - winStep
+        var bestPos = offset + maxLen
+        var minRms = Float.MAX_VALUE
+        var sumRms = 0f
+        var count = 0
+
+        var pos = searchStart
+        while (pos <= searchEnd) {
+            var e = 0.0
+            for (i in pos until pos + winStep) {
+                val s = samples[i].toDouble()
+                e += s * s
+            }
+            val rms = sqrt(e / winStep).toFloat()
+            sumRms += rms
+            count++
+            if (rms < minRms) {
+                minRms = rms
+                bestPos = pos + winStep / 2
+            }
+            pos += winStep
+        }
+
+        val avgRms = if (count > 0) sumRms / count else 0f
+        return if (avgRms > 1e-4f && minRms < avgRms * 0.65f) {
+            (bestPos - offset).coerceIn(sampleRate / 2, maxLen)
+        } else {
+            maxLen
+        }
+    }
+
     // endregion
 
     private companion object {
         const val TAG = "VadSegmenter"
         const val MAX_SEGMENTS_PER_DRAIN = 32
+        const val DEFAULT_PRE_ROLL_MS = 350
+    }
+}
+
+/** Fixed-capacity rolling ring buffer indexed by absolute session sample offset. */
+private class RecentAudioRingBuffer(capacity: Int) {
+
+    private val buffer = FloatArray(capacity.coerceAtLeast(1))
+    private var totalWritten: Long = 0L
+
+    fun clear() {
+        totalWritten = 0L
+    }
+
+    fun append(samples: FloatArray) {
+        val cap = buffer.size
+        if (samples.size >= cap) {
+            System.arraycopy(samples, samples.size - cap, buffer, 0, cap)
+            totalWritten += samples.size
+            return
+        }
+        val startIdx = (totalWritten % cap).toInt()
+        val firstPart = min(samples.size, cap - startIdx)
+        System.arraycopy(samples, 0, buffer, startIdx, firstPart)
+        val secondPart = samples.size - firstPart
+        if (secondPart > 0) {
+            System.arraycopy(samples, firstPart, buffer, 0, secondPart)
+        }
+        totalWritten += samples.size
+    }
+
+    /** Copies `[fromSample, toSample)` if it is still within the retained ring window. */
+    fun copyRange(fromSample: Long, toSample: Long): FloatArray? {
+        if (toSample <= fromSample) return null
+        val earliestAvailable = (totalWritten - buffer.size).coerceAtLeast(0L)
+        val safeFrom = fromSample.coerceAtLeast(earliestAvailable)
+        val safeTo = toSample.coerceAtMost(totalWritten)
+        val count = (safeTo - safeFrom).toInt()
+        if (count <= 0) return null
+
+        val out = FloatArray(count)
+        val cap = buffer.size
+        val startIdx = (safeFrom % cap).toInt()
+        val firstPart = min(count, cap - startIdx)
+        System.arraycopy(buffer, startIdx, out, 0, firstPart)
+        val secondPart = count - firstPart
+        if (secondPart > 0) {
+            System.arraycopy(buffer, 0, out, firstPart, secondPart)
+        }
+        return out
     }
 }
 

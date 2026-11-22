@@ -18,4 +18,5 @@ data class SessionEntity(
     val audioSource: AudioSourceType,
     val asrModel: AsrModelType,
     val language: String = "auto",
+    val audioFilePath: String? = null,
 )

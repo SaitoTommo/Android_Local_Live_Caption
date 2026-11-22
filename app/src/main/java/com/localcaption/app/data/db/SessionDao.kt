@@ -32,4 +32,7 @@ interface SessionDao {
 
     @Query("UPDATE sessions SET title = :title WHERE id = :sessionId")
     suspend fun rename(sessionId: Long, title: String)
+
+    @Query("UPDATE sessions SET audioFilePath = :audioFilePath WHERE id = :sessionId")
+    suspend fun updateAudioFilePath(sessionId: Long, audioFilePath: String?)
 }
