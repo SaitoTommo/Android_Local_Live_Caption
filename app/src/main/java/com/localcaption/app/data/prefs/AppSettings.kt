@@ -33,6 +33,7 @@ data class AppSettings(
     val enableDiarization: Boolean = true,
     val diarizationThreshold: Float = 0.58f,
     val vadSilenceMs: Int = 600,
+    val preRollSilenceRatio: Float = 0.30f,
     val maxSegmentDurationMs: Int = 10_000,
     val overlayBgAlpha: Float = 0.78f,
     val overlayMaxLines: Int = 3,
@@ -85,6 +86,7 @@ fun AppSettings.sanitized(): AppSettings = copy(
         AppSettings.MIN_VAD_SILENCE_MS,
         AppSettings.MAX_VAD_SILENCE_MS,
     ),
+    preRollSilenceRatio = preRollSilenceRatio.coerceIn(0f, 1f),
     maxSegmentDurationMs = maxSegmentDurationMs.coerceIn(
         AppSettings.MIN_SEGMENT_DURATION_MS,
         AppSettings.MAX_SEGMENT_DURATION_MS,

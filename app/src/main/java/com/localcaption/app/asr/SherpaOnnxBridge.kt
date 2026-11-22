@@ -677,6 +677,23 @@ object SherpaOnnxBridge {
         return null
     }
 
+    internal fun readStartSample(segment: Any): Long {
+        val getter = runCatching {
+            (segment.javaClass.getMethod("getStart").invoke(segment) as? Number)?.toLong()
+        }.getOrNull()
+        if (getter != null && getter >= 0L) return getter
+
+        val field = findField(segment.javaClass, "start")
+        if (field != null) {
+            val value = runCatching {
+                field.isAccessible = true
+                (field.get(segment) as? Number)?.toLong()
+            }.getOrNull()
+            if (value != null && value >= 0L) return value
+        }
+        return -1L
+    }
+
     internal fun releaseQuietly(target: Any) {
         val method = target.javaClass.methods.firstOrNull { candidate ->
             candidate.parameterCount == 0 &&
@@ -741,6 +758,12 @@ class SherpaOfflineRecognizer internal constructor(
     }
 }
 
+/** One segment popped from Silero VAD together with its exact sample start index. */
+class SherpaVadSegment(
+    val startSample: Long,
+    val samples: FloatArray,
+)
+
 /**
  * Handle over a Silero `VoiceActivityDetector`. Segments are popped in arrival order.
  */
@@ -757,6 +780,10 @@ interface SherpaVadHandle : AutoCloseable {
 
     /** Pops the oldest finished speech segment, or `null` when none is ready. */
     fun popSegment(): FloatArray?
+
+    /** Pops the oldest finished speech segment with its exact start sample index. */
+    fun popSegmentWithStart(): SherpaVadSegment? =
+        popSegment()?.let { SherpaVadSegment(startSample = -1L, samples = it) }
 
     /** Drains every finished speech segment. */
     fun flushSegments(): List<FloatArray>
@@ -810,15 +837,22 @@ private class SherpaVad(
         }.getOrDefault(false)
     }
 
-    override fun popSegment(): FloatArray? = synchronized(lock) {
+    override fun popSegment(): FloatArray? = popSegmentWithStart()?.samples
+
+    override fun popSegmentWithStart(): SherpaVadSegment? = synchronized(lock) {
         if (closed) return null
         runCatching {
             if (!hasSegment()) return null
             val segment = frontMethod.invoke(detector) ?: return null
             val samples = SherpaOnnxBridge.readSamples(segment)
+            val startSample = SherpaOnnxBridge.readStartSample(segment)
             popMethod.invoke(detector)
-            samples
-        }.getOrNull()?.takeIf { it.isNotEmpty() }
+            if (samples != null && samples.isNotEmpty()) {
+                SherpaVadSegment(startSample = startSample, samples = samples)
+            } else {
+                null
+            }
+        }.getOrNull()
     }
 
     override fun flushSegments(): List<FloatArray> {

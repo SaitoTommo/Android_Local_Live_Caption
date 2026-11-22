@@ -285,6 +285,21 @@ fun SettingsScreen() {
                 onValueChangeFinished = { commit() },
             )
             SliderRow(
+                title = "句首回溯比例（前段空白占比）",
+                valueText = "${(current.preRollSilenceRatio * 100).roundToInt()}%",
+                value = current.preRollSilenceRatio,
+                valueRange = 0f..1f,
+                onValueChange = {
+                    preview(current.copy(preRollSilenceRatio = it))
+                },
+                onValueChangeFinished = { commit() },
+            )
+            Text(
+                text = "按当前句前方空白间隔的比例回溯音频（上限 180 ms）以保留开头清辅音；调为 0% 则完全关闭回溯。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            SliderRow(
                 title = "单句最长时长",
                 valueText = String.format(
                     Locale.US,

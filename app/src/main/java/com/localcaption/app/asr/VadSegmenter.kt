@@ -60,7 +60,7 @@ class VadSegmenter(
     private val maxSegmentDurationMs: Int = 10_000,
     private val minSpeechDurationMs: Int = 250,
     private val energyThreshold: Float = 0.012f,
-    private val preRollMs: Int = DEFAULT_PRE_ROLL_MS,
+    private val preRollSilenceRatio: Float = DEFAULT_PRE_ROLL_SILENCE_RATIO,
     private val vadHandle: SherpaVadHandle? = null,
 ) : AutoCloseable {
 
@@ -74,8 +74,9 @@ class VadSegmenter(
             .toInt()
             .coerceAtLeast(1)
 
-    private val preRollSamples: Int =
-        ((sampleRate.toLong() * preRollMs) / 1000L).toInt().coerceAtLeast(0)
+    /** Hard cap on pre-roll lookback (180 ms) so long silences never add dead air. */
+    private val maxPreRollSamples: Int = ((sampleRate.toLong() * MAX_PRE_ROLL_MS) / 1000L).toInt()
+    private val safePreRollRatio: Float = preRollSilenceRatio.coerceIn(0f, 1f)
 
     /** Amount of trailing silence kept after a segment ends (120 ms). */
     private val tailKeepSamples: Int = (sampleRate * 12) / 100
@@ -179,9 +180,9 @@ class VadSegmenter(
         val out = mutableListOf<SpeechSegment>()
         var drained = 0
         while (drained < MAX_SEGMENTS_PER_DRAIN && handle.hasSegment()) {
-            val samples = handle.popSegment() ?: break
+            val vadSeg = handle.popSegmentWithStart() ?: break
             drained++
-            appendSileroSegment(out, samples, endSample)
+            appendSileroSegment(out, vadSeg.samples, vadSeg.startSample, endSample)
         }
         return out
     }
@@ -189,16 +190,29 @@ class VadSegmenter(
     private fun appendSileroSegment(
         out: MutableList<SpeechSegment>,
         samples: FloatArray,
-        endSample: Long,
+        reportedStartSample: Long,
+        fallbackEndSample: Long,
     ) {
         if (samples.isEmpty()) return
 
-        // Prepend up to preRollSamples from the rolling raw audio buffer right before the
-        // VAD trigger so soft leading consonants (p/t/k/s/sh/f/th) are preserved intact.
-        val rawStartSample = (endSample - samples.size).coerceAtLeast(0L)
-        val desiredPreStart = (rawStartSample - preRollSamples).coerceAtLeast(lastEmittedEndSample)
-        val preRoll = if (preRollSamples > 0 && rawStartSample > desiredPreStart) {
-            recentAudio.copyRange(desiredPreStart, rawStartSample)
+        // Use Silero VAD's exact segment.start sample index so we NEVER shift into the
+        // first syllable and duplicate opening characters.
+        val rawStartSample = if (reportedStartSample >= 0L) {
+            reportedStartSample
+        } else {
+            (fallbackEndSample - silenceSamplesThreshold - samples.size).coerceAtLeast(0L)
+        }
+        val rawEndSample = rawStartSample + samples.size
+
+        // Take only a configured percentage of the preceding silence gap (capped at 180 ms),
+        // strictly after lastEmittedEndSample so previous words can never leak in.
+        val availableGap = (rawStartSample - lastEmittedEndSample).coerceAtLeast(0L)
+        val preRollCount = min(
+            (availableGap * safePreRollRatio).toLong(),
+            maxPreRollSamples.toLong(),
+        )
+        val preRoll = if (preRollCount > 0L) {
+            recentAudio.copyRange(rawStartSample - preRollCount, rawStartSample)
         } else {
             null
         }
@@ -211,7 +225,7 @@ class VadSegmenter(
         } else {
             samples
         }
-        val combinedStartSample = (endSample - combined.size).coerceAtLeast(0L)
+        val combinedStartSample = (rawEndSample - combined.size).coerceAtLeast(0L)
 
         var offset = 0
         while (offset < combined.size) {
@@ -277,11 +291,15 @@ class VadSegmenter(
         if (segmentStartSample < 0L) {
             if (voiced) {
                 pending.clear()
-                // Prepend available pre-roll audio (without overlapping the previous segment)
-                // so soft leading consonants before the energy threshold trigger are kept.
-                val preStart = (frameStartSample - preRollSamples).coerceAtLeast(lastEmittedEndSample)
-                val preRoll = if (preRollSamples > 0 && frameStartSample > preStart) {
-                    recentAudio.copyRange(preStart, frameStartSample)
+                // Prepend a configured percentage of the preceding silence gap (capped at 180 ms)
+                // without overlapping the previous segment.
+                val availableGap = (frameStartSample - lastEmittedEndSample).coerceAtLeast(0L)
+                val preRollCount = min(
+                    (availableGap * safePreRollRatio).toLong(),
+                    maxPreRollSamples.toLong(),
+                )
+                val preRoll = if (preRollCount > 0L) {
+                    recentAudio.copyRange(frameStartSample - preRollCount, frameStartSample)
                 } else {
                     null
                 }
@@ -413,7 +431,8 @@ class VadSegmenter(
     private companion object {
         const val TAG = "VadSegmenter"
         const val MAX_SEGMENTS_PER_DRAIN = 32
-        const val DEFAULT_PRE_ROLL_MS = 350
+        const val DEFAULT_PRE_ROLL_SILENCE_RATIO = 0.30f
+        const val MAX_PRE_ROLL_MS = 180
     }
 }
 

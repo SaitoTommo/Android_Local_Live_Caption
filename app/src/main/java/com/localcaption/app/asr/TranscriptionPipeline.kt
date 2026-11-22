@@ -382,6 +382,7 @@ class TranscriptionPipeline(
                 sampleRate = AudioCaptureSource.SAMPLE_RATE,
                 vadSilenceMs = settings.vadSilenceMs,
                 maxSegmentDurationMs = settings.maxSegmentDurationMs,
+                preRollSilenceRatio = settings.preRollSilenceRatio,
                 vadHandle = vadHandle,
             )
 

@@ -53,6 +53,7 @@ class SettingsRepository(context: Context) {
             preferences[Keys.ENABLE_DIARIZATION] = sanitized.enableDiarization
             preferences[Keys.DIARIZATION_THRESHOLD] = sanitized.diarizationThreshold
             preferences[Keys.VAD_SILENCE_MS] = sanitized.vadSilenceMs
+            preferences[Keys.PRE_ROLL_SILENCE_RATIO] = sanitized.preRollSilenceRatio
             preferences[Keys.MAX_SEGMENT_DURATION_MS] = sanitized.maxSegmentDurationMs
             preferences[Keys.OVERLAY_BG_ALPHA] = sanitized.overlayBgAlpha
             preferences[Keys.OVERLAY_MAX_LINES] = sanitized.overlayMaxLines
@@ -162,6 +163,7 @@ class SettingsRepository(context: Context) {
             diarizationThreshold = this[Keys.DIARIZATION_THRESHOLD]
                 ?: defaults.diarizationThreshold,
             vadSilenceMs = this[Keys.VAD_SILENCE_MS] ?: defaults.vadSilenceMs,
+            preRollSilenceRatio = this[Keys.PRE_ROLL_SILENCE_RATIO] ?: defaults.preRollSilenceRatio,
             maxSegmentDurationMs = this[Keys.MAX_SEGMENT_DURATION_MS]
                 ?: defaults.maxSegmentDurationMs,
             overlayBgAlpha = this[Keys.OVERLAY_BG_ALPHA] ?: defaults.overlayBgAlpha,
@@ -184,6 +186,7 @@ class SettingsRepository(context: Context) {
         val ENABLE_DIARIZATION = booleanPreferencesKey("enable_diarization")
         val DIARIZATION_THRESHOLD = floatPreferencesKey("diarization_threshold")
         val VAD_SILENCE_MS = intPreferencesKey("vad_silence_ms")
+        val PRE_ROLL_SILENCE_RATIO = floatPreferencesKey("pre_roll_silence_ratio")
         val MAX_SEGMENT_DURATION_MS = intPreferencesKey("max_segment_duration_ms")
         val OVERLAY_BG_ALPHA = floatPreferencesKey("overlay_bg_alpha")
         val OVERLAY_MAX_LINES = intPreferencesKey("overlay_max_lines")
